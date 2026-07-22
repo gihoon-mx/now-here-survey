@@ -5,7 +5,17 @@ import { formatDuration, useElapsedSeconds } from '../lib/useElapsed'
 import { useWakeLock } from '../lib/useWakeLock'
 import { SLIDE_TYPE_LABEL, type Slide } from '../lib/types'
 
-export default function LiveControl({ sessionId }: { sessionId: string }) {
+export default function LiveControl({
+  sessionId,
+  surveyId,
+  onChanged,
+}: {
+  sessionId: string
+  /** 문항은 세션이 아니라 설문에 붙어 있습니다. */
+  surveyId: string
+  /** 진행 상태가 바뀌면 사이드바의 표시도 갱신합니다. */
+  onChanged?: () => void
+}) {
   const { session } = useLiveSession(sessionId)
   const [slides, setSlides] = useState<Slide[]>([])
   const [participantCount, setParticipantCount] = useState(0)
@@ -23,7 +33,7 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
         supabase
           .from('slides')
           .select('*')
-          .eq('session_id', sessionId)
+          .eq('survey_id', surveyId)
           .order('order_index'),
         supabase
           .from('participants')
@@ -33,7 +43,7 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
       setSlides((slideRows as Slide[]) ?? [])
       setParticipantCount(count ?? 0)
     })()
-  }, [sessionId])
+  }, [sessionId, surveyId])
 
   const current = slides.find(
     (s) => s.order_index === session?.current_slide_index,
@@ -93,6 +103,7 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
     setError(null)
     const { error: rpcError } = await supabase.rpc(fn, args)
     if (rpcError) setError(rpcError.message)
+    else onChanged?.()
     setBusy(false)
     setConfirmingBack(false)
   }
@@ -158,7 +169,13 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
         </div>
 
         {error && <p className="error">{error}</p>}
-        <ResetButton sessionId={sessionId} onDone={() => setError(null)} />
+        <ResetButton
+          sessionId={sessionId}
+          onDone={() => {
+            setError(null)
+            onChanged?.()
+          }}
+        />
       </div>
     )
 

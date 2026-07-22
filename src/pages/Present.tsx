@@ -14,6 +14,7 @@ export default function PresentPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const { session } = useLiveSession(sessionId ?? null)
   const [slides, setSlides] = useState<Slide[]>([])
+  const [surveyTitle, setSurveyTitle] = useState("")
   const [authorized, setAuthorized] = useState<boolean | null>(null)
 
   useWakeLock(true)
@@ -25,17 +26,22 @@ export default function PresentPage() {
     })()
   }, [])
 
+  // 문항은 설문에 붙어 있으므로 세션 → 설문을 거쳐 불러옵니다.
   useEffect(() => {
-    if (!sessionId || !authorized) return
+    if (!authorized || !session?.survey_id) return
     void (async () => {
-      const { data } = await supabase
-        .from('slides')
-        .select('*')
-        .eq('session_id', sessionId)
-        .order('order_index')
-      setSlides((data as Slide[]) ?? [])
+      const [slideRes, surveyRes] = await Promise.all([
+        supabase
+          .from('slides')
+          .select('*')
+          .eq('survey_id', session.survey_id)
+          .order('order_index'),
+        supabase.from('surveys').select('title').eq('id', session.survey_id).maybeSingle(),
+      ])
+      setSlides((slideRes.data as Slide[]) ?? [])
+      if (surveyRes.data) setSurveyTitle(surveyRes.data.title as string)
     })()
-  }, [sessionId, authorized])
+  }, [authorized, session?.survey_id])
 
   const totalElapsed = useElapsedSeconds(session?.started_at)
 
@@ -57,7 +63,7 @@ export default function PresentPage() {
   if (session.status === 'draft')
     return (
       <div className="present present--center">
-        <h1 className="present__title">{session.title}</h1>
+        <h1 className="present__title">{surveyTitle}</h1>
         <p className="present__sub">곧 시작합니다</p>
       </div>
     )

@@ -9,9 +9,18 @@ export const SLIDE_TYPE_LABEL: Record<SlideType, string> = {
 
 export type SessionStatus = 'draft' | 'live' | 'ended'
 
-export interface Session {
+/** 설문 하나. 문항을 보유하고, 아래 Session 으로 여러 번 진행할 수 있습니다. */
+export interface Survey {
   id: string
   title: string
+  created_at: string
+}
+
+/** 설문의 진행 회차. 회차마다 참가자·진행상태·응답이 따로입니다. */
+export interface Session {
+  id: string
+  survey_id: string
+  name: string
   status: SessionStatus
   current_slide_index: number
   started_at: string | null
@@ -34,7 +43,7 @@ export type RawOption = string | SlideOption
 
 export interface Slide {
   id: string
-  session_id: string
+  survey_id: string
   order_index: number
   type: SlideType
   title: string
@@ -70,6 +79,9 @@ export interface AdminParticipant {
   display_name: string
   connected: boolean
   last_seen_at: string | null
+  /** 설문 전체 결과를 내보낼 때만 채워집니다. */
+  session_id?: string
+  session_name?: string
 }
 
 export interface ResponseRow {

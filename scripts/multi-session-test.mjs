@@ -73,23 +73,26 @@ if (!login.ok) {
 }
 const ADMIN = login.data.access_token
 
-console.log('\n[준비] 같은 아이디 체계를 쓰는 설문 3개')
-await rest('/sessions?title=like.%5B회차테스트%5D*', { method: 'DELETE', token: ADMIN })
+console.log('\n[준비] 한 설문 안에 같은 아이디를 쓰는 회차 3개')
+await rest('/surveys?title=like.%5B회차테스트%5D*', { method: 'DELETE', token: ADMIN })
+
+const sv = await rest('/surveys', {
+  method: 'POST', token: ADMIN, prefer: 'return=representation',
+  body: { title: '[회차테스트] 설문' },
+})
+const SURVEY = sv.data[0].id
+await rest('/slides', {
+  method: 'POST', token: ADMIN, prefer: 'return=minimal',
+  body: [{ survey_id: SURVEY, order_index: 0, type: 'choice', title: '문항', options: [{label:'A'},{label:'B'}], multi: false }],
+})
 
 const sessions = []
 for (const name of ['오전', '오후1', '오후2']) {
   const s = await rest('/sessions', {
     method: 'POST', token: ADMIN, prefer: 'return=representation',
-    body: { title: `[회차테스트] ${name}` },
+    body: { survey_id: SURVEY, name },
   })
   const id = s.data[0].id
-  await rest('/slides', {
-    method: 'POST', token: ADMIN, prefer: 'return=minimal',
-    body: [{
-      session_id: id, order_index: 0, type: 'choice',
-      title: `${name} 문항`, options: [{ label: 'A' }, { label: 'B' }], multi: false,
-    }],
-  })
   // 세 설문 모두 같은 아이디/비밀번호를 씁니다 (명단을 복사해 쓰는 상황).
   await rest('/participants', {
     method: 'POST', token: ADMIN, prefer: 'return=minimal',
@@ -100,7 +103,7 @@ for (const name of ['오전', '오후1', '오후2']) {
   })
   sessions.push({ name, id })
 }
-check('설문 3개 생성 (모두 user01/1234)', sessions.length === 3)
+check('회차 3개 생성 (모두 user01/1234)', sessions.length === 3)
 
 const anon = async () => {
   const r = await call('/auth/v1/signup', { method: 'POST', body: {} })
@@ -108,21 +111,21 @@ const anon = async () => {
 }
 
 /* ----------------------------------------------- 1. 전부 준비 중일 때 */
-console.log('\n[1] 아직 아무 설문도 시작 전')
+console.log('\n[1] 아직 아무 회차도 시작 전')
 const t1 = await anon()
 const r1 = await rpc('claim_participant', { p_login_id: 'user01', p_passcode: '1234' }, t1)
-check('여러 설문에 걸치면 입장을 거부',
-  !r1.ok && String(r1.data?.message ?? '').includes('여러 설문'),
+check('여러 회차에 걸치면 입장을 거부',
+  !r1.ok && String(r1.data?.message ?? '').includes('여러 회차'),
   r1.ok ? '들어가졌음 (위험)' : r1.data?.message)
 
 /* ------------------------------------------- 2. 한 설문만 진행 중일 때 */
-console.log('\n[2] 오전 설문만 진행 중')
+console.log('\n[2] 오전 회차만 진행 중')
 await rpc('start_session', { p_session_id: sessions[0].id }, ADMIN)
 
 const t2 = await anon()
 const r2 = await rpc('claim_participant', { p_login_id: 'user01', p_passcode: '1234' }, t2)
-check('진행 중인 설문으로 들어감', r2.ok, r2.ok ? '' : JSON.stringify(r2.data))
-check('오전 설문이 맞음',
+check('진행 중인 회차로 들어감', r2.ok, r2.ok ? '' : JSON.stringify(r2.data))
+check('오전 회차가 맞음',
   r2.data?.[0]?.session_id === sessions[0].id,
   r2.data?.[0]?.session_title)
 
@@ -133,18 +136,18 @@ await rpc('start_session', { p_session_id: sessions[1].id }, ADMIN)
 
 const t3 = await anon()
 const r3 = await rpc('claim_participant', { p_login_id: 'user01', p_passcode: '1234' }, t3)
-check('이번에는 오후1 설문으로 들어감',
+check('이번에는 오후1 회차로 들어감',
   r3.ok && r3.data?.[0]?.session_id === sessions[1].id,
   r3.data?.[0]?.session_title)
 
 /* ----------------------------------------- 4. 두 설문이 동시에 진행 중 */
-console.log('\n[4] 실수로 두 설문이 동시에 진행 중')
+console.log('\n[4] 실수로 두 회차가 동시에 진행 중')
 await rpc('start_session', { p_session_id: sessions[2].id }, ADMIN)
 
 const t4 = await anon()
 const r4 = await rpc('claim_participant', { p_login_id: 'user01', p_passcode: '1234' }, t4)
 check('어느 쪽인지 모르면 조용히 넣지 않고 실패',
-  !r4.ok && String(r4.data?.message ?? '').includes('여러 설문'),
+  !r4.ok && String(r4.data?.message ?? '').includes('여러 회차'),
   r4.ok ? '들어가졌음 (위험)' : r4.data?.message)
 
 /* --------------------------------- 5. 아이디를 회차별로 나눈 경우 (권장) */
@@ -165,14 +168,12 @@ check('아이디가 갈리면 동시 진행 중이어도 정확히 들어감',
 
 const t6 = await anon()
 const r6 = await rpc('claim_participant', { p_login_id: 'am01', p_passcode: '1234' }, t6)
-check('다른 회차 아이디도 각자 제 설문으로',
+check('다른 회차 아이디도 각자 제 회차로',
   r6.ok && r6.data?.[0]?.session_id === sessions[0].id,
   r6.data?.[0]?.session_title)
 
 console.log('\n[정리]')
-for (const s of sessions) {
-  await rest(`/sessions?id=eq.${s.id}`, { method: 'DELETE', token: ADMIN })
-}
+await rest(`/surveys?id=eq.${SURVEY}`, { method: 'DELETE', token: ADMIN })
 console.log('  테스트 설문 삭제 완료')
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`)

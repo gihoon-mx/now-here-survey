@@ -138,6 +138,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: (p: Participant) => void }) {
 
 function LiveView({ participant }: { participant: Participant }) {
   const { session } = useLiveSession(participant.session_id)
+  const [surveyTitle, setSurveyTitle] = useState('')
   const [slide, setSlide] = useState<Slide | null>(null)
   const [answer, setAnswer] = useState<Answer | null>(null)
   const [comment, setComment] = useState('')
@@ -149,6 +150,19 @@ function LiveView({ participant }: { participant: Participant }) {
   const index = session?.current_slide_index ?? null
   const live = session?.status === 'live'
 
+  // 대기 화면에 보여 줄 설문 제목. RLS 로 자기 회차의 설문만 읽힙니다.
+  useEffect(() => {
+    if (!session?.survey_id) return
+    void (async () => {
+      const { data } = await supabase
+        .from('surveys')
+        .select('title')
+        .eq('id', session.survey_id)
+        .maybeSingle()
+      if (data) setSurveyTitle(data.title as string)
+    })()
+  }, [session?.survey_id])
+
   // 슬라이드가 바뀔 때마다 문항과 "내가 이미 낸 응답"을 함께 불러옵니다.
   useEffect(() => {
     if (!live || index == null) {
@@ -158,10 +172,11 @@ function LiveView({ participant }: { participant: Participant }) {
     let cancelled = false
 
     void (async () => {
+      // 문항은 설문에 붙어 있습니다. RLS 가 "내 회차의 설문 중 진행된
+      // 순번까지"만 보여 주므로, 순번만으로 안전하게 찾을 수 있습니다.
       const { data: slideRow } = await supabase
         .from('slides')
         .select('*')
-        .eq('session_id', participant.session_id)
         .eq('order_index', index)
         .maybeSingle()
 
@@ -249,7 +264,7 @@ function LiveView({ participant }: { participant: Participant }) {
   if (session.status === 'draft')
     return (
       <Centered>
-        <h1 className="waiting__title">{session.title}</h1>
+        <h1 className="waiting__title">{surveyTitle}</h1>
         <p className="waiting__body">
           {participant.display_name}님, 입장하셨습니다.
           <br />곧 시작합니다. 이 화면을 그대로 두고 기다려 주세요.

@@ -89,21 +89,31 @@ if (loginErr) {
   process.exit(1)
 }
 
-await admin.from('sessions').delete().like('title', '[부하테스트]%')
+await admin.from('surveys').delete().like('title', '[부하테스트]%')
 
-const { data: session, error: sErr } = await admin
-  .from('sessions')
+const { data: survey, error: svErr } = await admin
+  .from('surveys')
   .insert({ title: `[부하테스트] ${new Date().toISOString().slice(0, 16)}` })
   .select()
   .single()
+if (svErr) {
+  console.error('설문 생성 실패:', svErr.message)
+  process.exit(1)
+}
+
+const { data: session, error: sErr } = await admin
+  .from('sessions')
+  .insert({ survey_id: survey.id, name: '1회차' })
+  .select()
+  .single()
 if (sErr) {
-  console.error('세션 생성 실패:', sErr.message)
+  console.error('회차 생성 실패:', sErr.message)
   process.exit(1)
 }
 
 await admin.from('slides').insert(
   Array.from({ length: SLIDES }, (_, i) => ({
-    session_id: session.id,
+    survey_id: survey.id,
     order_index: i,
     type: 'choice',
     title: `부하테스트 문항 ${i + 1}`,
@@ -116,7 +126,7 @@ await admin.from('slides').insert(
 const { data: slides } = await admin
   .from('slides')
   .select('id, order_index')
-  .eq('session_id', session.id)
+  .eq('survey_id', survey.id)
   .order('order_index')
 
 await admin.from('participants').insert(
@@ -129,7 +139,7 @@ await admin.from('participants').insert(
 )
 
 const cleanup = async () => {
-  await admin.from('sessions').delete().eq('id', session.id)
+  await admin.from('surveys').delete().eq('id', survey.id)
 }
 process.on('SIGINT', async () => {
   await cleanup()

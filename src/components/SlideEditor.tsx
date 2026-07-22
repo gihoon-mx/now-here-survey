@@ -16,20 +16,19 @@ import {
   type SlideType,
 } from '../lib/types'
 
+/*
+ * 새 항목은 빈칸으로 시작합니다. 예시 문구를 채워 두면 지우는 일이 먼저
+ * 생기고, 지우지 않은 채 진행에 들어가는 사고도 납니다.
+ * 다지선다는 선택지 칸만 네 개 만들어 둡니다 (가장 흔한 개수).
+ */
 const DEFAULT_OPTIONS: Record<SlideType, SlideOption[]> = {
-  choice: [
-    { label: '매우 그렇다' },
-    { label: '그렇다' },
-    { label: '보통이다' },
-    { label: '그렇지 않다' },
-    { label: '전혀 그렇지 않다' },
-  ],
+  choice: [{ label: '' }, { label: '' }, { label: '' }, { label: '' }],
   ox: [{ label: 'O' }, { label: 'X' }],
   info: [],
   text: [],
 }
 
-export default function SlideEditor({ sessionId }: { sessionId: string }) {
+export default function SlideEditor({ surveyId }: { surveyId: string }) {
   const [slides, setSlides] = useState<Slide[]>([])
   const [loading, setLoading] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
@@ -45,7 +44,7 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
     const { data } = await supabase
       .from('slides')
       .select('*')
-      .eq('session_id', sessionId)
+      .eq('survey_id', surveyId)
       .order('order_index')
     setSlides((data as Slide[]) ?? [])
     setLoading(false)
@@ -53,17 +52,17 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     void load()
-  }, [sessionId])
+  }, [surveyId])
 
   const add = async (type: SlideType) => {
     setError(null)
     const { data, error: insertError } = await supabase
       .from('slides')
       .insert({
-        session_id: sessionId,
+        survey_id: surveyId,
         order_index: slides.length,
         type,
-        title: type === 'info' ? '새 안내 페이지' : '새 문항',
+        title: '',
         options: DEFAULT_OPTIONS[type],
       })
       .select()
@@ -136,13 +135,13 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
           )
         )
           return
-        await supabase.from('slides').delete().eq('session_id', sessionId)
+        await supabase.from('slides').delete().eq('survey_id', surveyId)
       }
 
       const base = mode === 'replace' ? 0 : slides.length
       const { error: insertError } = await supabase.from('slides').insert(
         parsed.map((row, i) => ({
-          session_id: sessionId,
+          survey_id: surveyId,
           order_index: base + i,
           type: row.type,
           title: row.title,
@@ -254,7 +253,13 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
                 <span className={`slide-card__type slide-card__type--${slide.type}`}>
                   {SLIDE_TYPE_LABEL[slide.type]}
                 </span>
-                <span className="slide-card__title">{slide.title}</span>
+                <span
+                  className={
+                    'slide-card__title' + (slide.title ? '' : ' slide-card__title--empty')
+                  }
+                >
+                  {slide.title || '(제목 없음)'}
+                </span>
               </button>
               <div className="slide-card__tools">
                 <button className="icon-btn" title="위로" onClick={() => move(slide.id, -1)}>

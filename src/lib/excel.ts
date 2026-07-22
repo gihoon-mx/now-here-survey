@@ -334,12 +334,19 @@ function formatTimestamp(iso: string | null): string {
  *  - "문항"       : 문항 정의 백업.
  */
 export function buildWorkbook(params: {
-  sessionTitle: string
   slides: Slide[]
   participants: AdminParticipant[]
   responses: ResponseRow[]
+  /** 여러 세션을 한 파일에 담을 때 세션 이름 열을 넣습니다. */
+  includeSession?: boolean
 }): XLSX.WorkBook {
-  const { sessionTitle, slides, participants, responses } = params
+  const { slides, participants, responses, includeSession = false } = params
+
+  /** 세션 열은 여러 세션이 섞일 때만 의미가 있습니다. */
+  const who = (p: AdminParticipant): Record<string, string> =>
+    includeSession
+      ? { 세션: p.session_name ?? '', 이름: p.display_name, 아이디: p.login_id }
+      : { 이름: p.display_name, 아이디: p.login_id }
 
   // 안내 페이지는 응답이 없으므로 결과 시트에서 제외합니다.
   const questionSlides = slides
@@ -355,10 +362,7 @@ export function buildWorkbook(params: {
 
   /* 가로 */
   const wide = participants.map((p) => {
-    const row: Record<string, string> = {
-      이름: p.display_name,
-      아이디: p.login_id,
-    }
+    const row: Record<string, string> = { ...who(p) }
     questionSlides.forEach((slide, i) => {
       // 문항 제목이 겹쳐도 열이 합쳐지지 않도록 번호를 붙입니다.
       row[`${i + 1}. ${slide.title}`] = answerToText(
@@ -385,8 +389,7 @@ export function buildWorkbook(params: {
       if (!isQuestion && !response?.comment) return
 
       long.push({
-        이름: p.display_name,
-        아이디: p.login_id,
+        ...who(p),
         문항번호: i + 1,
         문항: slide.title,
         유형: TYPE_LABEL[slide.type],
@@ -408,8 +411,7 @@ export function buildWorkbook(params: {
       comments.push({
         문항번호: i + 1,
         문항: slide.title,
-        이름: p.display_name,
-        아이디: p.login_id,
+        ...who(p),
         응답: answerToText(byKey.get(`${slide.id}::${p.id}`)?.answer),
         의견: comment,
       })
@@ -457,8 +459,6 @@ export function buildWorkbook(params: {
     '문항',
   )
 
-  // 시트 이름에는 쓸 수 없는 문자가 있어 제목은 파일명에만 사용합니다.
-  void sessionTitle
   return workbook
 }
 

@@ -82,14 +82,23 @@ check('is_admin() = true', isAdmin.data === true, JSON.stringify(isAdmin.data))
 
 /* ------------------------------------------------------ 2. 설문 구성 */
 console.log('\n[2] 설문 구성')
-await rest('/sessions?title=like.%5B자동테스트%5D*', { method: 'DELETE', token: ADMIN })
+await rest('/surveys?title=like.%5B자동테스트%5D*', { method: 'DELETE', token: ADMIN })
 
-const mkSession = await rest('/sessions', {
+const mkSurvey = await rest('/surveys', {
   method: 'POST', token: ADMIN,
   headers: { Prefer: 'return=representation' },
   body: { title: '[자동테스트] 삭제해도 됩니다' },
 })
-check('세션 생성', mkSession.ok, mkSession.ok ? '' : JSON.stringify(mkSession.data))
+check('설문 생성', mkSurvey.ok, mkSurvey.ok ? '' : JSON.stringify(mkSurvey.data))
+const SURVEY = mkSurvey.data?.[0]?.id
+if (!SURVEY) process.exit(1)
+
+const mkSession = await rest('/sessions', {
+  method: 'POST', token: ADMIN,
+  headers: { Prefer: 'return=representation' },
+  body: { survey_id: SURVEY, name: '1회차' },
+})
+check('회차 생성', mkSession.ok, mkSession.ok ? '' : JSON.stringify(mkSession.data))
 const SESSION = mkSession.data?.[0]?.id
 if (!SESSION) process.exit(1)
 
@@ -98,10 +107,10 @@ const mkSlides = await rest('/slides', {
   method: 'POST', token: ADMIN,
   headers: { Prefer: 'return=representation' },
   body: [
-    { session_id: SESSION, order_index: 0, type: 'info',   title: '안내',        options: [] },
-    { session_id: SESSION, order_index: 1, type: 'choice', title: '만족도는?',   options: ['매우 그렇다', '보통', '아니다'] },
-    { session_id: SESSION, order_index: 2, type: 'ox',     title: '재참여 의향', options: ['O', 'X'] },
-    { session_id: SESSION, order_index: 3, type: 'text',   title: '자유 의견',   options: [] },
+    { survey_id: SURVEY, order_index: 0, type: 'info',   title: '안내',        options: [] },
+    { survey_id: SURVEY, order_index: 1, type: 'choice', title: '만족도는?',   options: ['매우 그렇다', '보통', '아니다'] },
+    { survey_id: SURVEY, order_index: 2, type: 'ox',     title: '재참여 의향', options: ['O', 'X'] },
+    { survey_id: SURVEY, order_index: 3, type: 'text',   title: '자유 의견',   options: [] },
   ],
 })
 check('슬라이드 4개 생성', mkSlides.ok, mkSlides.ok ? '' : JSON.stringify(mkSlides.data))
@@ -160,7 +169,7 @@ console.log('\n[5] 진행 제어')
 const start = await rpc('start_session', { p_session_id: SESSION }, ADMIN)
 check('관리자가 세션 시작', start.ok, start.ok ? '' : JSON.stringify(start.data))
 
-const notAdmin = await rpc('start_session', { p_session_id: SESSION }, P1)
+const notAdmin = await rpc('start_session', { p_survey_id: SURVEY }, P1)
 check('참가자는 세션을 제어할 수 없음', !notAdmin.ok, `status ${notAdmin.status}`)
 
 const seen0 = await rest('/slides?select=order_index&order=order_index', { token: P1 })
@@ -285,7 +294,7 @@ check('준비 중 상태로 되돌아감',
   JSON.stringify(rs))
 
 const keptSlides = await rest(
-  `/slides?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
+  `/slides?select=id&survey_id=eq.${SURVEY}`, { token: ADMIN })
 check('문항은 남아 있음', keptSlides.data?.length === 4, `${keptSlides.data?.length}개`)
 
 const keptParts = await rest(
@@ -298,14 +307,14 @@ const stillLinked = await rest('/participants?select=login_id', { token: P1 })
 check('참가자 접속이 유지됨', stillLinked.data?.length === 1,
   JSON.stringify(stillLinked.data))
 
-const dup = await rpc('duplicate_session',
-  { p_session_id: SESSION, p_title: '[자동테스트] 사본' }, ADMIN)
+const dup = await rpc('duplicate_survey',
+  { p_survey_id: SURVEY, p_title: '[자동테스트] 사본' }, ADMIN)
 check('설문 복사', dup.ok && typeof dup.data === 'string',
   dup.ok ? '' : JSON.stringify(dup.data))
 const COPY = dup.data
 
 const copiedSlides = await rest(
-  `/slides?select=order_index,type,title,options&session_id=eq.${COPY}&order=order_index`,
+  `/slides?select=order_index,type,title,options&survey_id=eq.${COPY}&order=order_index`,
   { token: ADMIN })
 check('문항이 순서까지 복제됨',
   copiedSlides.data?.length === 4 &&
@@ -313,27 +322,28 @@ check('문항이 순서까지 복제됨',
   copiedSlides.data[1].options.length === 3,
   `${copiedSlides.data?.length}개`)
 
-const copiedParts = await rest(
-  `/participants?select=id&session_id=eq.${COPY}`, { token: ADMIN })
-check('참가자는 복제되지 않음', copiedParts.data?.length === 0,
-  `${copiedParts.data?.length}명`)
+// 회차는 복제하지 않습니다 — 사본은 새 진행을 위한 것이라 참가자도 회차도
+// 새로 만드는 것이 맞습니다.
+const copiedSessions = await rest(
+  `/sessions?select=id&survey_id=eq.${COPY}`, { token: ADMIN })
+check('회차는 복제되지 않음', copiedSessions.data?.length === 0,
+  `${copiedSessions.data?.length}개`)
 
 const copyState = await rest(
-  `/sessions?select=title,status&id=eq.${COPY}`, { token: ADMIN })
-check('사본은 준비 중 상태로 생성됨',
-  copyState.data?.[0]?.status === 'draft' &&
+  `/surveys?select=title&id=eq.${COPY}`, { token: ADMIN })
+check('사본 제목이 지정한 대로',
   copyState.data?.[0]?.title === '[자동테스트] 사본',
   JSON.stringify(copyState.data?.[0]))
 
 const notAdminReset = await rpc('reset_session', { p_session_id: SESSION }, P1)
 check('참가자는 초기화할 수 없음', !notAdminReset.ok, `status ${notAdminReset.status}`)
 
-const notAdminDup = await rpc('duplicate_session', { p_session_id: SESSION }, P1)
+const notAdminDup = await rpc('duplicate_survey', { p_survey_id: SURVEY }, P1)
 check('참가자는 복사할 수 없음', !notAdminDup.ok, `status ${notAdminDup.status}`)
 
-await rest(`/sessions?id=eq.${COPY}`, { method: 'DELETE', token: ADMIN })
+await rest(`/surveys?id=eq.${COPY}`, { method: 'DELETE', token: ADMIN })
 
-const del = await rest(`/sessions?id=eq.${SESSION}`, { method: 'DELETE', token: ADMIN })
+const del = await rest(`/surveys?id=eq.${SURVEY}`, { method: 'DELETE', token: ADMIN })
 check('테스트 세션 삭제 (참가자·응답 연쇄 삭제)', del.ok, `status ${del.status}`)
 
 console.log(`\n===== ${pass} passed, ${fail} failed =====`)

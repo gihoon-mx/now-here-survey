@@ -13,7 +13,7 @@ import { SLIDE_TYPE_LABEL, type Answer, type Slide } from '../lib/types'
  *
  * 실제로 사람을 모아 리허설한 뒤에는 "다시 시작하기"로 응답을 지우면 됩니다.
  */
-export default function TestRun({ sessionId }: { sessionId: string }) {
+export default function TestRun({ surveyId }: { surveyId: string }) {
   const [slides, setSlides] = useState<Slide[]>([])
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
@@ -26,12 +26,12 @@ export default function TestRun({ sessionId }: { sessionId: string }) {
       const { data } = await supabase
         .from('slides')
         .select('*')
-        .eq('session_id', sessionId)
+        .eq('survey_id', surveyId)
         .order('order_index')
       setSlides((data as Slide[]) ?? [])
       setLoading(false)
     })()
-  }, [sessionId])
+  }, [surveyId])
 
   if (loading) return <p className="muted">불러오는 중…</p>
 
