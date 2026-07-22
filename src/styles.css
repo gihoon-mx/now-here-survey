@@ -4,39 +4,41 @@
    ============================================================ */
 
 /*
- * 색은 옅은 톤으로만 씁니다. 현장에서 몇십 분 동안 들여다보는 화면이라
- * 채도가 높으면 금방 피로해지고, 문항 내용보다 색이 먼저 눈에 들어옵니다.
- * 진한 색은 "지금 눌러야 하는 것"과 "잘못된 것"에만 남겨 둡니다.
+ * 밝고 산뜻한 톤. 참가자 폰 화면이 행사 분위기를 따라가도록 배경은 옅은
+ * 라벤더-블루, 포인트는 선명한 인디고→보라 그라데이션을 씁니다.
+ * 다만 문항 내용보다 색이 먼저 눈에 들어오지 않게, 진한 색은
+ * "지금 눌러야 하는 것"과 "잘못된 것"에만 남겨 둡니다.
  */
 :root {
-  --bg: #f4f6fb;
-  --bg-tint: #eaeef8;
+  --bg: #f4f6ff;
+  --bg-tint: #e7ecff;
   --surface: #ffffff;
-  --surface-soft: #fafbff;
-  --border: #e3e7f1;
-  --border-strong: #ccd3e4;
-  --text: #1b2133;
-  --muted: #6b7488;
+  --surface-soft: #f8faff;
+  --border: #e2e7f8;
+  --border-strong: #c9d2ee;
+  --text: #222941;
+  --muted: #687291;
 
-  --primary: #5468d4;
-  --primary-soft: #eef1fd;
+  --primary: #5a5fe0;
+  --primary-soft: #edefff;
   --primary-ink: #ffffff;
+  --primary-grad: linear-gradient(135deg, #5a5fe0 0%, #8b5cf6 100%);
 
-  --ok: #2f8558;
-  --ok-soft: #e9f5ee;
-  --danger: #cf4759;
-  --danger-soft: #fdeef1;
-  --warn: #a9722a;
-  --warn-soft: #fbf3e7;
+  --ok: #17a56d;
+  --ok-soft: #e2f8ee;
+  --danger: #e14e68;
+  --danger-soft: #fdecf0;
+  --warn: #b3791f;
+  --warn-soft: #fdf3e0;
 
   /* 문항 유형 구분용. 편집기에서 목록을 훑을 때 유형이 바로 보이게 합니다. */
-  --type-choice: #6f62c9;
-  --type-ox: #3a8d9b;
-  --type-info: #b07a45;
-  --type-text: #5f8a4a;
+  --type-choice: #7c68e8;
+  --type-ox: #2f9fb3;
+  --type-info: #c98a3e;
+  --type-text: #5fa04e;
 
-  --radius: 12px;
-  --shadow: 0 1px 2px rgb(27 33 51 / 5%), 0 4px 14px rgb(27 33 51 / 5%);
+  --radius: 14px;
+  --shadow: 0 1px 2px rgb(34 41 65 / 4%), 0 6px 20px rgb(34 41 65 / 6%);
 }
 
 * {
@@ -163,7 +165,7 @@ body {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 16px;
   font-size: 1rem;
   font-family: inherit;
@@ -184,9 +186,15 @@ body {
 }
 
 .btn--primary {
-  background: var(--primary);
-  border-color: var(--primary);
+  background: var(--primary-grad);
+  border-color: transparent;
   color: var(--primary-ink);
+  box-shadow: 0 3px 10px rgb(90 95 224 / 28%);
+}
+
+.btn--primary:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 4px rgb(90 95 224 / 24%);
 }
 
 .btn--danger {
@@ -264,16 +272,18 @@ select {
   font-size: 16px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--surface);
   color: var(--text);
   width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 input:focus,
 textarea:focus {
-  outline: 2px solid var(--primary);
-  outline-offset: -1px;
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 textarea {
@@ -313,11 +323,20 @@ textarea {
 
 /* -------------------------------------------------------- 참가자 화면 */
 
+/* 참가자 화면 상단 바. 스크롤해도 이름과 저장 상태가 보이게 붙어 다닙니다. */
 .topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 16px;
+  box-shadow: var(--shadow);
 }
 
 .topbar__name {
@@ -395,12 +414,13 @@ textarea {
 
 .waiting__title {
   margin: 0;
-  font-size: 1.3rem;
+  font-size: 1.5rem;
 }
 
 .waiting__body {
   color: var(--muted);
   margin: 0;
+  line-height: 1.7;
 }
 
 .choices {
@@ -429,7 +449,7 @@ textarea {
   font-size: 1.05rem;
   text-align: left;
   padding: 16px;
-  border-radius: 12px;
+  border-radius: 14px;
   border: 2px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -439,13 +459,40 @@ textarea {
   flex-direction: column;
   justify-content: center;
   gap: 3px;
-  transition: border-color 0.12s, background 0.12s;
+  position: relative;
+  box-shadow: 0 1px 2px rgb(34 41 65 / 4%);
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.08s;
+}
+
+.choice:active {
+  transform: scale(0.985);
 }
 
 .choice--selected {
   border-color: var(--primary);
   background: var(--primary-soft);
   font-weight: 600;
+  padding-right: 46px;
+  box-shadow: 0 4px 14px rgb(90 95 224 / 18%);
+}
+
+/* 고른 선택지에 체크 표시. 무엇을 골랐는지 한눈에 보입니다. */
+.choice--selected::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--primary-grad);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .choice__label {
@@ -488,19 +535,27 @@ textarea {
 .pageview__item {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 18px;
   box-shadow: var(--shadow);
-  padding: 16px;
+  padding: 18px;
 }
 
+/* 문항 번호 칩. 지금 몇 번째 문항인지 훑어보기 좋게 알약 모양으로. */
 .pageview__num {
+  align-self: flex-start;
   font-size: 0.75rem;
   font-weight: 700;
-  color: var(--muted);
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 3px 10px;
+  border-radius: 999px;
   font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* 항목별 자유 의견 — 평소에는 한 줄로 접혀 있어 문항을 가리지 않습니다. */
@@ -530,19 +585,25 @@ textarea {
   padding: 10px;
 }
 
-/* 접힌 상태의 "＋ 의견 남기기" 한 줄 버튼 */
+/* 접힌 상태의 "의견 남기기" 한 줄 버튼 */
 .comment__add {
   appearance: none;
   border: 1px dashed var(--border-strong);
-  background: transparent;
-  border-radius: 8px;
-  padding: 8px 10px;
+  background: var(--surface-soft);
+  border-radius: 999px;
+  padding: 8px 14px;
   font-family: inherit;
   font-size: 0.85rem;
   color: var(--muted);
   text-align: left;
   cursor: pointer;
   min-height: 38px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.comment__add:active {
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .comment__actions {

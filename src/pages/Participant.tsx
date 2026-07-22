@@ -97,7 +97,7 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: (p: Participant) => void }) {
   return (
     <div className="screen screen--center">
       <form className="card login" onSubmit={submit}>
-        <h1 className="login__title">설문 참여</h1>
+        <h1 className="login__title">📝 설문 참여</h1>
         <p className="login__hint">진행자가 안내한 아이디와 비밀번호를 입력해 주세요.</p>
 
         <label className="field">
@@ -281,8 +281,8 @@ function LiveView({ participant }: { participant: Participant }) {
       <Centered>
         <h1 className="waiting__title">{surveyTitle}</h1>
         <p className="waiting__body">
-          {participant.display_name}님, 입장하셨습니다.
-          <br />곧 시작합니다. 이 화면을 그대로 두고 기다려 주세요.
+          👋 {participant.display_name}님, 입장하셨습니다.
+          <br />곧 시작합니다. 이 화면을 그대로 두고 기다려 주세요 ⏳
         </p>
       </Centered>
     )
@@ -293,7 +293,7 @@ function LiveView({ participant }: { participant: Participant }) {
   if (!page || slides.length === 0)
     return (
       <Centered>
-        <h1 className="waiting__title">잠시만 기다려 주세요</h1>
+        <h1 className="waiting__title">⏳ 잠시만 기다려 주세요</h1>
         <p className="waiting__body">진행자가 곧 다음 페이지를 시작합니다.</p>
       </Centered>
     )
@@ -340,7 +340,7 @@ function LiveView({ participant }: { participant: Participant }) {
         {questions.length > 0 && (
           <p className="slide__note">
             {questions.length > 1
-              ? '화면을 내리며 모든 문항에 답해 주세요. 진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'
+              ? '✍️ 화면을 내리며 모든 문항에 답해 주세요. 진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'
               : '진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'}
           </p>
         )}
@@ -418,15 +418,15 @@ function EndedView({ participant }: { participant: Participant }) {
   if (phase === 'summary')
     return (
       <Centered>
-        <h1 className="waiting__title">설문이 종료되었습니다</h1>
-        <p className="waiting__body">참여해 주셔서 감사합니다.</p>
+        <h1 className="waiting__title">🎉 설문이 종료되었습니다</h1>
+        <p className="waiting__body">참여해 주셔서 감사합니다 🙏</p>
         {missed.length > 0 && (
           <>
             <p className="waiting__body">
               아직 답하지 않은 문항이 <strong>{missed.length}개</strong> 있습니다.
             </p>
             <button className="btn btn--primary btn--lg" onClick={() => setPhase('makeup')}>
-              미응답 문항 답변하기
+              ✍️ 미응답 문항 답변하기
             </button>
           </>
         )}
@@ -478,7 +478,7 @@ function EndedView({ participant }: { participant: Participant }) {
 
         {remaining === 0 && (
           <div className="card">
-            <p className="notice">모든 문항에 답했습니다. 참여해 주셔서 감사합니다.</p>
+            <p className="notice">🎉 모든 문항에 답했습니다. 참여해 주셔서 감사합니다!</p>
           </div>
         )}
       </main>
@@ -504,7 +504,7 @@ function PageBadge({
   // 안내만 있는 페이지에는 응답 수를 셀 것이 없습니다.
   // (의견은 안내 페이지에도 남길 수 있습니다.)
   if (total === 0) return null
-  if (answered >= total) return <span className="badge badge--ok">모두 응답</span>
+  if (answered >= total) return <span className="badge badge--ok">✅ 모두 응답</span>
   if (total === 1) return <span className="badge badge--muted">미응답</span>
   return (
     <span className="badge badge--muted">

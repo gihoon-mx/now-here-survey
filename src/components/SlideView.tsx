@@ -190,7 +190,7 @@ function CommentBox({
               setEditing(true)
             }}
           >
-            ＋ 의견 남기기 <span className="comment__optional">(선택)</span>
+            💬 의견 남기기 <span className="comment__optional">(선택)</span>
           </button>
           {justSaved && <span className="comment__saved-badge">입력됨 ✓</span>}
         </div>
@@ -200,7 +200,7 @@ function CommentBox({
       <div className="comment comment--compact">
         <div className="comment__view">
           <span className="comment__label">
-            내 의견
+            💬 내 의견
             {justSaved && <span className="comment__saved-badge"> 입력됨 ✓</span>}
           </span>
           <p className="comment__text">{value}</p>
@@ -222,7 +222,7 @@ function CommentBox({
   return (
     <div className="comment comment--compact">
       <label className="comment__label" htmlFor="slide-comment">
-        의견 <span className="comment__optional">(선택)</span>
+        💬 의견 <span className="comment__optional">(선택)</span>
       </label>
       <textarea
         id="slide-comment"
