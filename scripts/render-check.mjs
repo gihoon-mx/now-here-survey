@@ -235,6 +235,52 @@ try {
 check('선택지 없는 다지선다는 거부', noOptionsError.includes('선택지가 없습니다'),
   noOptionsError.split('\n')[0])
 
+/* ---------------------------------------------------------- 라우팅 */
+/*
+ * 라우트에 적은 파라미터 이름과 페이지가 useParams 로 꺼내는 이름이 어긋나면,
+ * 값이 undefined 로 들어와 화면이 조용히 엉뚱하게 나옵니다. 빌드도 통과하고
+ * 에러도 없어서 눈으로는 알아채기 어렵습니다. (실제로 :sessionId 로 두고
+ * surveyId 를 읽어, 설문을 눌러도 목록만 다시 나온 적이 있습니다.)
+ */
+console.log('\n[라우팅]')
+
+const { readFileSync: readSrc } = await import('node:fs')
+const { join: joinPath, dirname: dirName } = await import('node:path')
+const { fileURLToPath: toPath } = await import('node:url')
+const root = joinPath(dirName(toPath(import.meta.url)), '..')
+
+const appSrc = readSrc(joinPath(root, 'src/App.tsx'), 'utf8')
+
+const PAGE_FILE = {
+  ParticipantPage: 'src/pages/Participant.tsx',
+  AdminPage: 'src/pages/Admin.tsx',
+  PresentPage: 'src/pages/Present.tsx',
+}
+
+const routes = [...appSrc.matchAll(/<Route\s+path="([^"]+)"\s+element=\{<(\w+)/g)]
+check('라우트를 읽어냄', routes.length >= 4, `${routes.length}개`)
+
+for (const [, path, component] of routes) {
+  const params = [...path.matchAll(/:(\w+)/g)].map((m) => m[1])
+  if (params.length === 0) continue
+
+  const file = PAGE_FILE[component]
+  if (!file) {
+    check(`${path} → ${component} 파일을 앎`, false, '매핑에 없음')
+    continue
+  }
+
+  const pageSrc = readSrc(joinPath(root, file), "utf8")
+  for (const param of params) {
+    // useParams 구조분해 안에 그 이름이 있는지 봅니다.
+    const used = new RegExp(`const\\s*\\{[^}]*\\b${param}\\b[^}]*\\}\\s*=\\s*useParams`).test(
+      pageSrc,
+    )
+    check(`${path} 의 :${param} 를 ${component} 가 읽음`, used,
+      used ? '' : `${file} 의 useParams 에 ${param} 없음`)
+  }
+}
+
 await server.close()
 console.log(`\n===== ${pass} passed, ${fail} failed =====`)
 process.exit(fail > 0 ? 1 : 0)

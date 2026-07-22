@@ -22,7 +22,9 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ParticipantPage />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="/admin/:sessionId" element={<AdminPage />} />
+          {/* 이름이 Admin.tsx 의 useParams 키와 정확히 같아야 합니다.
+              어긋나면 값이 undefined 로 들어와 조용히 목록 화면만 나옵니다. */}
+          <Route path="/admin/:surveyId" element={<AdminPage />} />
           <Route path="/present/:sessionId" element={<PresentPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
