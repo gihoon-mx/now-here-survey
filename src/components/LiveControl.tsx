@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useLiveSession } from '../lib/useLiveSession'
 import { formatDuration, useElapsedSeconds } from '../lib/useElapsed'
 import { useWakeLock } from '../lib/useWakeLock'
-import { SLIDE_TYPE_LABEL, type Slide } from '../lib/types'
+import { SLIDE_TYPE_LABEL, type Page, type Slide } from '../lib/types'
 
 export default function LiveControl({
   sessionId,
@@ -11,15 +11,17 @@ export default function LiveControl({
   onChanged,
 }: {
   sessionId: string
-  /** 문항은 세션이 아니라 설문에 붙어 있습니다. */
+  /** 페이지·문항은 세션이 아니라 설문에 붙어 있습니다. */
   surveyId: string
   /** 진행 상태가 바뀌면 사이드바의 표시도 갱신합니다. */
   onChanged?: () => void
 }) {
   const { session } = useLiveSession(sessionId)
+  const [pages, setPages] = useState<Page[]>([])
   const [slides, setSlides] = useState<Slide[]>([])
   const [participantCount, setParticipantCount] = useState(0)
-  const [answered, setAnswered] = useState(0)
+  /** 문항별 응답 인원 (answer 가 실제로 채워진 행만). */
+  const [answered, setAnswered] = useState<Record<string, number>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmingBack, setConfirmingBack] = useState(false)
@@ -29,7 +31,12 @@ export default function LiveControl({
 
   useEffect(() => {
     void (async () => {
-      const [{ data: slideRows }, { count }] = await Promise.all([
+      const [{ data: pageRows }, { data: slideRows }, { count }] = await Promise.all([
+        supabase
+          .from('pages')
+          .select('*')
+          .eq('survey_id', surveyId)
+          .order('order_index'),
         supabase
           .from('slides')
           .select('*')
@@ -40,47 +47,68 @@ export default function LiveControl({
           .select('id', { count: 'exact', head: true })
           .eq('session_id', sessionId),
       ])
+      setPages((pageRows as Page[]) ?? [])
       setSlides((slideRows as Slide[]) ?? [])
       setParticipantCount(count ?? 0)
     })()
   }, [sessionId, surveyId])
 
-  const current = slides.find(
-    (s) => s.order_index === session?.current_slide_index,
-  )
-  const next = slides.find(
-    (s) => s.order_index === (session?.current_slide_index ?? -1) + 1,
+  const pageSlides = useCallback(
+    (page: Page | undefined) =>
+      page
+        ? slides
+            .filter((s) => s.page_id === page.id)
+            .sort((a, b) => a.order_index - b.order_index)
+        : [],
+    [slides],
   )
 
-  // 지금 문항에 몇 명이 답했는지. 응답 "내용"은 보지 않고 수만 셉니다.
+  const current = pages.find((p) => p.order_index === session?.current_page_index)
+  const next = pages.find(
+    (p) => p.order_index === (session?.current_page_index ?? -1) + 1,
+  )
+  const currentSlides = pageSlides(current)
+  const currentQuestions = currentSlides.filter((s) => s.type !== 'info')
+
+  // 지금 페이지의 문항마다 몇 명이 답했는지. 응답 "내용"은 보지 않고 수만 셉니다.
+  // (배열은 렌더마다 새로 만들어지므로, 의존성은 id 를 이어 붙인 문자열로 둡니다.)
+  const questionIds = currentQuestions.map((s) => s.id).join(',')
   const refreshAnswered = useCallback(async () => {
-    if (!current) {
-      setAnswered(0)
+    const ids = questionIds ? questionIds.split(',') : []
+    if (ids.length === 0) {
+      setAnswered({})
       return
     }
     // 의견만 남기고 답은 고르지 않은 사람도 행이 생기므로, 실제로 응답한
     // 사람만 셉니다. (이 숫자를 보고 넘길 타이밍을 잡기 때문에 중요합니다.)
-    const { count } = await supabase
+    // 문항은 설문의 여러 회차가 공유하므로 이 회차의 응답만 셉니다.
+    const { data } = await supabase
       .from('responses')
-      .select('id', { count: 'exact', head: true })
-      .eq('slide_id', current.id)
+      .select('slide_id')
+      .eq('session_id', sessionId)
+      .in('slide_id', ids)
       .not('answer', 'is', null)
-    setAnswered(count ?? 0)
-  }, [current])
+    const counts: Record<string, number> = {}
+    for (const row of (data as { slide_id: string }[]) ?? []) {
+      counts[row.slide_id] = (counts[row.slide_id] ?? 0) + 1
+    }
+    setAnswered(counts)
+  }, [questionIds, sessionId])
 
   useEffect(() => {
     void refreshAnswered()
     if (!current) return
 
+    // 페이지 안 문항이 여럿이라 세션 단위로 구독합니다.
     const channel = supabase
-      .channel(`responses:${current.id}`)
+      .channel(`responses:${sessionId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'responses',
-          filter: `slide_id=eq.${current.id}`,
+          filter: `session_id=eq.${sessionId}`,
         },
         () => void refreshAnswered(),
       )
@@ -96,7 +124,7 @@ export default function LiveControl({
       clearInterval(poll)
       void supabase.removeChannel(channel)
     }
-  }, [current, refreshAnswered])
+  }, [current?.id, sessionId, refreshAnswered])
 
   const call = async (fn: string, args: Record<string, unknown>) => {
     setBusy(true)
@@ -109,11 +137,11 @@ export default function LiveControl({
   }
 
   const totalElapsed = useElapsedSeconds(session?.started_at)
-  const slideElapsed = useElapsedSeconds(session?.current_slide_started_at)
+  const pageElapsed = useElapsedSeconds(session?.current_page_started_at)
 
   if (!session) return <p className="muted">불러오는 중…</p>
 
-  if (slides.length === 0)
+  if (pages.length === 0 || slides.length === 0)
     return (
       <div className="card">
         <p className="muted">
@@ -130,10 +158,11 @@ export default function LiveControl({
       <div className="control">
         <div className="card">
           <p>
-            문항 {slides.length}개 · 등록된 참가자 {participantCount}명
+            페이지 {pages.length}개 · 문항 {slides.length}개 · 등록된 참가자{' '}
+            {participantCount}명
           </p>
           <p className="muted">
-            시작하면 참가자 폰이 첫 항목으로 동시에 넘어갑니다.
+            시작하면 참가자 폰이 첫 페이지로 동시에 넘어갑니다.
           </p>
           {participantCount === 0 && (
             <p className="warn">
@@ -180,7 +209,12 @@ export default function LiveControl({
     )
 
   /* --------------------------------------------------------- 진행 중 */
-  const isLast = session.current_slide_index >= slides.length - 1
+  const isLast = session.current_page_index >= pages.length - 1
+  const nextSlides = pageSlides(next)
+
+  /** 페이지를 요약해 보여 줍니다 — 제목이 있으면 제목, 없으면 첫 문항. */
+  const pageLabel = (page: Page | undefined, inPage: Slide[]) =>
+    page?.title || inPage[0]?.title || '(빈 페이지)'
 
   return (
     <div className="control">
@@ -190,32 +224,61 @@ export default function LiveControl({
           <span className="timer__value">{formatDuration(totalElapsed)}</span>
         </div>
         <div className="timer">
-          <span className="timer__label">이 항목</span>
-          <span className="timer__value">{formatDuration(slideElapsed)}</span>
+          <span className="timer__label">이 페이지</span>
+          <span className="timer__value">{formatDuration(pageElapsed)}</span>
         </div>
       </div>
 
       <div className="card current">
         <span className="current__meta">
-          {session.current_slide_index + 1} / {slides.length}
-          {current && ` · ${SLIDE_TYPE_LABEL[current.type]}`}
+          {session.current_page_index + 1} / {pages.length} 페이지
+          {currentSlides.length > 1 && ` · 문항 ${currentSlides.length}개`}
+          {currentSlides.length === 1 &&
+            ` · ${SLIDE_TYPE_LABEL[currentSlides[0].type]}`}
         </span>
-        <h2 className="current__title">{current?.title ?? '—'}</h2>
-        {current?.body && <p className="current__body">{current.body}</p>}
+        <h2 className="current__title">{pageLabel(current, currentSlides)}</h2>
+        {currentSlides.length === 1 && currentSlides[0].body && (
+          <p className="current__body">{currentSlides[0].body}</p>
+        )}
+
+        {/* 문항이 여럿이면 문항별 응답 수를 나란히 보여 줍니다.
+            이 숫자를 보고 넘길 타이밍을 잡습니다. */}
+        {currentSlides.length > 1 && (
+          <ul className="current__slides">
+            {currentSlides.map((slide) => (
+              <li key={slide.id} className="current__slide">
+                <span
+                  className={`slide-card__type slide-card__type--${slide.type}`}
+                >
+                  {SLIDE_TYPE_LABEL[slide.type]}
+                </span>
+                <span className="current__slide-title">
+                  {slide.title || '(제목 없음)'}
+                </span>
+                {slide.type !== 'info' && (
+                  <span className="current__slide-count">
+                    {answered[slide.id] ?? 0} / {participantCount}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="card upnext">
         <span className="upnext__label">다음</span>
         <span className="upnext__title">
-          {next ? next.title : '— 마지막 항목입니다 —'}
+          {next ? pageLabel(next, nextSlides) : '— 마지막 페이지입니다 —'}
         </span>
       </div>
 
-      {/* 응답 수만 보여 줍니다. 내용은 종료 후 결과 탭에서 확인합니다. */}
-      {current && current.type !== 'info' && (
+      {/* 문항이 하나면 예전처럼 큰 카운터 하나만 보여 줍니다. */}
+      {currentQuestions.length === 1 && (
         <div className="counter">
           <span className="counter__value">
-            {answered} <span className="counter__total">/ {participantCount}</span>
+            {answered[currentQuestions[0].id] ?? 0}{' '}
+            <span className="counter__total">/ {participantCount}</span>
           </span>
           <span className="counter__label">응답</span>
         </div>
@@ -226,10 +289,10 @@ export default function LiveControl({
       <div className="control__actions">
         {confirmingBack ? (
           <div className="confirm">
-            <span>이전 항목으로 돌아갈까요?</span>
+            <span>이전 페이지로 돌아갈까요?</span>
             <button
               className="btn btn--sm"
-              onClick={() => call('move_slide', { p_session_id: sessionId, p_delta: -1 })}
+              onClick={() => call('move_page', { p_session_id: sessionId, p_delta: -1 })}
             >
               돌아가기
             </button>
@@ -240,7 +303,7 @@ export default function LiveControl({
         ) : (
           <button
             className="btn btn--ghost btn--sm"
-            disabled={busy || session.current_slide_index === 0}
+            disabled={busy || session.current_page_index === 0}
             onClick={() => setConfirmingBack(true)}
           >
             ← 이전
@@ -259,7 +322,7 @@ export default function LiveControl({
           <button
             className="btn btn--primary btn--block btn--lg"
             disabled={busy}
-            onClick={() => call('move_slide', { p_session_id: sessionId, p_delta: 1 })}
+            onClick={() => call('move_page', { p_session_id: sessionId, p_delta: 1 })}
           >
             다음 →
           </button>

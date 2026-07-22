@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { buildWorkbook, downloadWorkbook, safeFilename } from '../lib/excel'
-import type { AdminParticipant, ResponseRow, Slide } from '../lib/types'
+import type { AdminParticipant, Page, ResponseRow, Slide } from '../lib/types'
 
 export type ExportScope =
   | { kind: 'survey' }
@@ -28,12 +28,12 @@ export default function ResultsExport({
     setNotice(null)
 
     try {
-      // 문항은 설문에 붙어 있으므로 두 경우 모두 같습니다.
-      const slidesRes = await supabase
-        .from('slides')
-        .select('*')
-        .eq('survey_id', surveyId)
-        .order('order_index')
+      // 페이지·문항은 설문에 붙어 있으므로 두 경우 모두 같습니다.
+      const [pagesRes, slidesRes] = await Promise.all([
+        supabase.from('pages').select('*').eq('survey_id', surveyId).order('order_index'),
+        supabase.from('slides').select('*').eq('survey_id', surveyId).order('order_index'),
+      ])
+      if (pagesRes.error) throw new Error(pagesRes.error.message)
       if (slidesRes.error) throw new Error(slidesRes.error.message)
 
       let participants: AdminParticipant[]
@@ -70,6 +70,7 @@ export default function ResultsExport({
         throw new Error('참가자가 없어 내려받을 결과가 없습니다.')
 
       const workbook = buildWorkbook({
+        pages: (pagesRes.data as Page[]) ?? [],
         slides: (slidesRes.data as Slide[]) ?? [],
         participants,
         responses,

@@ -4,9 +4,10 @@
 -- 재실행해도 안전하도록 작성되어 있습니다.
 --
 -- 구조
---   surveys      설문 하나. 문항을 가집니다.
+--   surveys      설문 하나. 페이지를 가집니다.
 --   sessions     그 설문의 진행 회차. 회차마다 참가자·진행상태·응답이 따로입니다.
---   slides       문항. 설문에 속합니다 (회차가 아니라).
+--   pages        페이지. 진행자가 한 번에 넘기는 단위. 문항을 여러 개 담습니다.
+--   slides       문항. 페이지에 속합니다.
 --   participants 참가자. 회차에 배정됩니다.
 --   responses    응답. 회차 + 문항 + 참가자.
 -- ============================================================
@@ -30,21 +31,33 @@ create table if not exists public.surveys (
 );
 
 create table if not exists public.sessions (
-  id                       uuid primary key default gen_random_uuid(),
-  survey_id                uuid references public.surveys(id) on delete cascade,
-  name                     text,
-  status                   text not null default 'draft'
-                             check (status in ('draft', 'live', 'ended')),
-  current_slide_index      int  not null default 0,
-  started_at               timestamptz,
-  current_slide_started_at timestamptz,
-  ended_at                 timestamptz,
-  created_at               timestamptz not null default now()
+  id                      uuid primary key default gen_random_uuid(),
+  survey_id               uuid references public.surveys(id) on delete cascade,
+  name                    text,
+  status                  text not null default 'draft'
+                            check (status in ('draft', 'live', 'ended')),
+  current_page_index      int  not null default 0,
+  started_at              timestamptz,
+  current_page_started_at timestamptz,
+  ended_at                timestamptz,
+  created_at              timestamptz not null default now()
 );
 
+-- 페이지. 진행자가 한 번에 넘기는 단위이고, 문항을 여러 개 담을 수 있습니다.
+-- 참가자는 한 페이지 안의 문항을 스크롤하며 모두 답한 뒤 다음 페이지로 넘어갑니다.
+create table if not exists public.pages (
+  id          uuid primary key default gen_random_uuid(),
+  survey_id   uuid not null references public.surveys(id) on delete cascade,
+  order_index int  not null,
+  title       text,
+  created_at  timestamptz not null default now()
+);
+
+-- 문항. 페이지에 속합니다.
 create table if not exists public.slides (
   id          uuid primary key default gen_random_uuid(),
   survey_id   uuid references public.surveys(id) on delete cascade,
+  page_id     uuid references public.pages(id) on delete cascade,
   order_index int  not null,
   type        text not null check (type in ('choice', 'ox', 'info', 'text')),
   title       text not null default '',
@@ -162,7 +175,65 @@ end $$;
 
 update public.sessions set name = '1회차' where name is null or trim(name) = '';
 
+-- ------------------------------------------------------------
+-- 2-2. 이행 — 문항 단위 진행에서 페이지 단위 진행으로
+-- ------------------------------------------------------------
+-- 예전에는 문항 하나가 곧 넘기는 단위였습니다. 이제 넘기는 단위는 페이지이고,
+-- 페이지가 문항을 여러 개 담습니다. 기존 문항은 각각 자기만의 페이지를 얻어
+-- 진행 방식이 그대로 유지됩니다 (문항 1개 = 페이지 1개).
+
+-- 진행 위치 열 이름을 페이지 기준으로 바꿉니다. 값은 그대로 둡니다 —
+-- 아래에서 문항과 페이지를 1:1 로 만들므로 순번이 정확히 일치합니다.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'sessions'
+      and column_name = 'current_slide_index'
+  ) then
+    alter table public.sessions rename column current_slide_index to current_page_index;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'sessions'
+      and column_name = 'current_slide_started_at'
+  ) then
+    alter table public.sessions rename column current_slide_started_at to current_page_started_at;
+  end if;
+end $$;
+
+-- 페이지가 없는 문항에 페이지를 하나씩 만들어 붙입니다. 이미 이행된 문항은
+-- 건드리지 않으므로 재실행해도 안전합니다.
+do $$
+declare
+  r      record;
+  v_page uuid;
+begin
+  for r in
+    select id, survey_id, order_index from public.slides
+    where page_id is null
+    order by survey_id, order_index
+  loop
+    insert into public.pages (survey_id, order_index)
+    values (r.survey_id, r.order_index)
+    returning id into v_page;
+
+    -- 페이지 안에서는 첫 번째(유일한) 문항이 됩니다.
+    update public.slides set page_id = v_page, order_index = 0 where id = r.id;
+  end loop;
+end $$;
+
+do $$
+begin
+  if not exists (select 1 from public.slides where page_id is null) then
+    alter table public.slides alter column page_id set not null;
+  end if;
+end $$;
+
+create index if not exists pages_survey_order_idx     on public.pages (survey_id, order_index);
 create index if not exists slides_survey_order_idx    on public.slides (survey_id, order_index);
+create index if not exists slides_page_order_idx      on public.slides (page_id, order_index);
 create index if not exists sessions_survey_idx        on public.sessions (survey_id);
 create index if not exists participants_auth_user_idx on public.participants (auth_user_id);
 create index if not exists responses_session_idx      on public.responses (session_id);
@@ -285,6 +356,7 @@ declare
   v_session_id     uuid;
   v_slide          public.slides%rowtype;
   v_session        public.sessions%rowtype;
+  v_page_index     int;
 begin
   select id, session_id into v_participant_id, v_session_id
   from public.participants where auth_user_id = auth.uid();
@@ -305,7 +377,10 @@ begin
     raise exception '진행 중인 설문이 아닙니다.';
   end if;
 
-  if v_slide.order_index <> v_session.current_slide_index then
+  -- 진행 중인 페이지의 문항인지 서버에서 직접 확인합니다.
+  -- 페이지 안에서의 순서는 상관없고, 페이지가 지나갔는지가 기준입니다.
+  select order_index into v_page_index from public.pages where id = v_slide.page_id;
+  if v_page_index is distinct from v_session.current_page_index then
     raise exception '이미 지나간 문항입니다.';
   end if;
 
@@ -329,6 +404,7 @@ declare
   v_session_id     uuid;
   v_slide          public.slides%rowtype;
   v_session        public.sessions%rowtype;
+  v_page_index     int;
 begin
   select id, session_id into v_participant_id, v_session_id
   from public.participants where auth_user_id = auth.uid();
@@ -348,7 +424,8 @@ begin
     raise exception '진행 중인 설문이 아닙니다.';
   end if;
 
-  if v_slide.order_index <> v_session.current_slide_index then
+  select order_index into v_page_index from public.pages where id = v_slide.page_id;
+  if v_page_index is distinct from v_session.current_page_index then
     raise exception '이미 지나간 문항입니다.';
   end if;
 
@@ -371,13 +448,14 @@ begin
   if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
 
   update public.sessions
-     set status = 'live', current_slide_index = 0,
-         started_at = now(), current_slide_started_at = now(), ended_at = null
+     set status = 'live', current_page_index = 0,
+         started_at = now(), current_page_started_at = now(), ended_at = null
    where id = p_session_id;
 end;
 $$;
 
-create or replace function public.move_slide(p_session_id uuid, p_delta int)
+-- 페이지 단위로 넘기고 돌아갑니다 (p_delta = ±1).
+create or replace function public.move_page(p_session_id uuid, p_delta int)
 returns int
 language plpgsql security definer set search_path = public
 as $$
@@ -388,17 +466,17 @@ declare
 begin
   if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
 
-  select current_slide_index into v_current from public.sessions where id = p_session_id;
+  select current_page_index into v_current from public.sessions where id = p_session_id;
 
-  select coalesce(max(sl.order_index), -1) into v_max
-  from public.slides sl
-  join public.sessions s on s.survey_id = sl.survey_id
+  select coalesce(max(pg.order_index), -1) into v_max
+  from public.pages pg
+  join public.sessions s on s.survey_id = pg.survey_id
   where s.id = p_session_id;
 
   v_next := greatest(0, least(v_current + p_delta, v_max));
 
   update public.sessions
-     set current_slide_index = v_next, current_slide_started_at = now()
+     set current_page_index = v_next, current_page_started_at = now()
    where id = p_session_id;
 
   return v_next;
@@ -427,8 +505,8 @@ begin
   delete from public.responses where session_id = p_session_id;
 
   update public.sessions
-     set status = 'draft', current_slide_index = 0,
-         started_at = null, current_slide_started_at = null, ended_at = null
+     set status = 'draft', current_page_index = 0,
+         started_at = null, current_page_started_at = null, ended_at = null
    where id = p_session_id;
 end;
 $$;
@@ -442,8 +520,10 @@ returns uuid
 language plpgsql security definer set search_path = public
 as $$
 declare
-  v_new_id uuid;
-  v_title  text;
+  v_new_id   uuid;
+  v_title    text;
+  r          record;
+  v_new_page uuid;
 begin
   if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
 
@@ -457,9 +537,19 @@ begin
   values (v_title, auth.uid())
   returning id into v_new_id;
 
-  insert into public.slides (survey_id, order_index, type, title, body, options, multi, required)
-  select v_new_id, order_index, type, title, body, options, multi, required
-  from public.slides where survey_id = p_survey_id;
+  -- 페이지를 먼저 복제하고, 각 페이지의 문항을 새 페이지에 붙입니다.
+  for r in
+    select id, order_index, title from public.pages
+    where survey_id = p_survey_id order by order_index
+  loop
+    insert into public.pages (survey_id, order_index, title)
+    values (v_new_id, r.order_index, r.title)
+    returning id into v_new_page;
+
+    insert into public.slides (survey_id, page_id, order_index, type, title, body, options, multi, required)
+    select v_new_id, v_new_page, order_index, type, title, body, options, multi, required
+    from public.slides where page_id = r.id;
+  end loop;
 
   return v_new_id;
 end;
@@ -511,6 +601,7 @@ $$;
 alter table public.admins       enable row level security;
 alter table public.surveys      enable row level security;
 alter table public.sessions     enable row level security;
+alter table public.pages        enable row level security;
 alter table public.slides       enable row level security;
 alter table public.participants enable row level security;
 alter table public.responses    enable row level security;
@@ -547,11 +638,32 @@ create policy sessions_participant_read on public.sessions
     id = (select session_id from public.participants where auth_user_id = auth.uid())
   );
 
+drop policy if exists pages_admin_all on public.pages;
+create policy pages_admin_all on public.pages
+  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+
+-- 자기 회차가 속한 설문의 페이지 중, 지금까지 진행된 순번까지만.
+drop policy if exists pages_participant_read on public.pages;
+create policy pages_participant_read on public.pages
+  for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.participants p
+      join public.sessions s on s.id = p.session_id
+      where p.auth_user_id = auth.uid()
+        and s.survey_id = pages.survey_id
+        and s.status = 'live'
+        and pages.order_index <= s.current_page_index
+    )
+  );
+
 drop policy if exists slides_admin_all on public.slides;
 create policy slides_admin_all on public.slides
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
--- 자기 회차가 속한 설문의 문항 중, 지금까지 진행된 순번까지만.
+-- 문항은 자기 페이지가 공개된 만큼만 보입니다. 개발자 도구를 열어도
+-- 아직 나오지 않은 페이지의 문항은 읽히지 않습니다.
 drop policy if exists slides_participant_read on public.slides;
 create policy slides_participant_read on public.slides
   for select to authenticated
@@ -560,10 +672,11 @@ create policy slides_participant_read on public.slides
       select 1
       from public.participants p
       join public.sessions s on s.id = p.session_id
+      join public.pages pg on pg.id = slides.page_id
       where p.auth_user_id = auth.uid()
         and s.survey_id = slides.survey_id
         and s.status = 'live'
-        and slides.order_index <= s.current_slide_index
+        and pg.order_index <= s.current_page_index
     )
   );
 
@@ -595,6 +708,7 @@ grant usage on schema public to authenticated;
 
 grant select, insert, update, delete on public.surveys   to authenticated;
 grant select, insert, update, delete on public.sessions  to authenticated;
+grant select, insert, update, delete on public.pages     to authenticated;
 grant select, insert, update, delete on public.slides    to authenticated;
 grant select, insert, update, delete on public.responses to authenticated;
 grant select on public.admins to authenticated;
@@ -613,7 +727,7 @@ grant execute on function public.claim_participant(text, text)  to authenticated
 grant execute on function public.submit_response(uuid, jsonb)   to authenticated;
 grant execute on function public.submit_comment(uuid, text)     to authenticated;
 grant execute on function public.start_session(uuid)            to authenticated;
-grant execute on function public.move_slide(uuid, int)          to authenticated;
+grant execute on function public.move_page(uuid, int)           to authenticated;
 grant execute on function public.end_session(uuid)              to authenticated;
 grant execute on function public.reset_session(uuid)            to authenticated;
 grant execute on function public.duplicate_survey(uuid, text)   to authenticated;
@@ -644,5 +758,6 @@ begin
   end if;
 end $$;
 
--- 예전 함수 정리 (설문=1회 진행 구조에서 쓰던 것)
-drop function if exists public.duplicate_session(uuid, text);
+-- 예전 함수 정리
+drop function if exists public.duplicate_session(uuid, text);  -- 설문=1회 진행 구조에서 쓰던 것
+drop function if exists public.move_slide(uuid, int);          -- 문항 단위 진행에서 쓰던 것 (→ move_page)

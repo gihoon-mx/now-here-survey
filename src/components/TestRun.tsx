@@ -1,19 +1,20 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { SlideView } from './SlideView'
-import { SLIDE_TYPE_LABEL, type Answer, type Slide } from '../lib/types'
+import type { Answer, Page, Slide } from '../lib/types'
 
 /**
  * 설문 테스트.
  *
  * 참가자 화면 그대로 처음부터 끝까지 넘겨 보는 기능입니다. DB 에는 아무것도
  * 쓰지 않으므로 실제 세션 상태나 응답에 영향이 없고, 참가자 폰도 움직이지
- * 않습니다. 문구가 어색하지 않은지, 선택지가 빠지지 않았는지, 항목 순서가
+ * 않습니다. 문구가 어색하지 않은지, 선택지가 빠지지 않았는지, 페이지 구성이
  * 맞는지를 혼자 확인하는 용도입니다.
  *
  * 실제로 사람을 모아 리허설한 뒤에는 "다시 시작하기"로 응답을 지우면 됩니다.
  */
 export default function TestRun({ surveyId }: { surveyId: string }) {
+  const [pages, setPages] = useState<Page[]>([])
   const [slides, setSlides] = useState<Slide[]>([])
   const [loading, setLoading] = useState(true)
   const [index, setIndex] = useState(0)
@@ -23,19 +24,19 @@ export default function TestRun({ surveyId }: { surveyId: string }) {
 
   useEffect(() => {
     void (async () => {
-      const { data } = await supabase
-        .from('slides')
-        .select('*')
-        .eq('survey_id', surveyId)
-        .order('order_index')
-      setSlides((data as Slide[]) ?? [])
+      const [pageRes, slideRes] = await Promise.all([
+        supabase.from('pages').select('*').eq('survey_id', surveyId).order('order_index'),
+        supabase.from('slides').select('*').eq('survey_id', surveyId).order('order_index'),
+      ])
+      setPages((pageRes.data as Page[]) ?? [])
+      setSlides((slideRes.data as Slide[]) ?? [])
       setLoading(false)
     })()
   }, [surveyId])
 
   if (loading) return <p className="muted">불러오는 중…</p>
 
-  if (slides.length === 0)
+  if (pages.length === 0 || slides.length === 0)
     return (
       <div className="card">
         <p className="muted">
@@ -44,8 +45,11 @@ export default function TestRun({ surveyId }: { surveyId: string }) {
       </div>
     )
 
-  const slide = slides[index]
-  const atEnd = index >= slides.length - 1
+  const page = pages[Math.min(index, pages.length - 1)]
+  const pageSlides = slides
+    .filter((s) => s.page_id === page.id)
+    .sort((a, b) => a.order_index - b.order_index)
+  const atEnd = index >= pages.length - 1
 
   return (
     <div className="testrun">
@@ -59,25 +63,31 @@ export default function TestRun({ surveyId }: { surveyId: string }) {
 
       <div className="testrun__meta">
         <span>
-          {index + 1} / {slides.length}
+          {index + 1} / {pages.length} 페이지
         </span>
-        <span className={`slide-card__type slide-card__type--${slide.type}`}>
-          {SLIDE_TYPE_LABEL[slide.type]}
-        </span>
+        {page.title && <span>{page.title}</span>}
+        <span className="muted">문항 {pageSlides.length}개</span>
       </div>
 
       <div className="preview__frame testrun__frame">
-        <div className="slide">
-          <SlideView
-            slide={slide}
-            answer={answers[slide.id] ?? null}
-            onChange={(next) => setAnswers((prev) => ({ ...prev, [slide.id]: next }))}
-            comment={comments[slide.id] ?? ''}
-            onCommentChange={(next) =>
-              setComments((prev) => ({ ...prev, [slide.id]: next }))
-            }
-          />
-        </div>
+        {pageSlides.map((slide, i) => (
+          <div key={slide.id} className="slide testrun__slide">
+            {pageSlides.length > 1 && (
+              <span className="pageview__num">
+                {i + 1} / {pageSlides.length}
+              </span>
+            )}
+            <SlideView
+              slide={slide}
+              answer={answers[slide.id] ?? null}
+              onChange={(next) => setAnswers((prev) => ({ ...prev, [slide.id]: next }))}
+              comment={comments[slide.id] ?? ''}
+              onCommentChange={(next) =>
+                setComments((prev) => ({ ...prev, [slide.id]: next }))
+              }
+            />
+          </div>
+        ))}
       </div>
 
       <div className="testrun__nav">
@@ -99,7 +109,7 @@ export default function TestRun({ surveyId }: { surveyId: string }) {
 
       {atEnd && (
         <p className="muted testrun__done">
-          마지막 항목입니다. 처음부터 다시 보려면{' '}
+          마지막 페이지입니다. 처음부터 다시 보려면{' '}
           <button
             className="btn btn--sm btn--ghost"
             onClick={() => {

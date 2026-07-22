@@ -81,9 +81,13 @@ const sv = await rest('/surveys', {
   body: { title: '[회차테스트] 설문' },
 })
 const SURVEY = sv.data[0].id
+const pg = await rest('/pages', {
+  method: 'POST', token: ADMIN, prefer: 'return=representation',
+  body: [{ survey_id: SURVEY, order_index: 0 }],
+})
 await rest('/slides', {
   method: 'POST', token: ADMIN, prefer: 'return=minimal',
-  body: [{ survey_id: SURVEY, order_index: 0, type: 'choice', title: '문항', options: [{label:'A'},{label:'B'}], multi: false }],
+  body: [{ survey_id: SURVEY, page_id: pg.data[0].id, order_index: 0, type: 'choice', title: '문항', options: [{label:'A'},{label:'B'}], multi: false }],
 })
 
 const sessions = []

@@ -177,17 +177,29 @@ const asFile = (workbook, name) => {
 }
 
 const template = await excel.parseSlideFile(asFile(excel.buildSlideTemplate(), 't.xlsx'))
-check('양식 파일이 그대로 읽힘', template.length === 4, `${template.length}행`)
+const templateSlides = template.flatMap((p) => p.slides)
+check('양식 파일이 그대로 읽힘 (페이지 3개, 문항 4개)',
+  template.length === 3 && templateSlides.length === 4,
+  `페이지 ${template.length}개, 문항 ${templateSlides.length}개`)
+check('양식 — 페이지 값이 같은 문항이 한 페이지로 묶임',
+  template[1].slides.length === 2,
+  `${template[1].slides.length}개`)
+check('양식 — 페이지 제목 보존', template[1].title === '만족도', template[1].title)
 check('양식 — 유형이 코드로 변환됨',
-  template.map((r) => r.type).join(',') === 'info,choice,ox,text',
-  template.map((r) => r.type).join(','))
+  templateSlides.map((r) => r.type).join(',') === 'info,choice,ox,text',
+  templateSlides.map((r) => r.type).join(','))
 check('양식 — OX 선택지 설명 보존',
-  template[2].options[0].description === '참여하겠다')
+  template[1].slides[1].options[0].description === '참여하겠다')
 
 // 내보낸 문항을 다시 가져오는 경로 (실제로 가장 많이 쓰게 될 흐름).
-const exported = excel.buildSlideWorkbook([
-  { order_index: 0, type: 'info', title: '안내', body: '설명입니다', options: [], multi: false },
+const exportPages = [
+  { id: 'p1', order_index: 0, title: '첫 페이지' },
+  { id: 'p2', order_index: 1, title: null },
+]
+const exported = excel.buildSlideWorkbook(exportPages, [
+  { page_id: 'p1', order_index: 0, type: 'info', title: '안내', body: '설명입니다', options: [], multi: false },
   {
+    page_id: 'p1',
     order_index: 1,
     type: 'choice',
     title: '복수 문항',
@@ -195,13 +207,51 @@ const exported = excel.buildSlideWorkbook([
     options: [{ label: 'A', description: '가' }, { label: 'B' }],
     multi: true,
   },
+  { page_id: 'p2', order_index: 0, type: 'text', title: '자유 의견', body: null, options: [], multi: false },
 ])
 const reimported = await excel.parseSlideFile(asFile(exported, 'e.xlsx'))
-check('내보낸 문항을 다시 가져옴', reimported.length === 2)
+check('내보낸 문항을 다시 가져옴 (페이지 구성 유지)',
+  reimported.length === 2 &&
+  reimported[0].slides.length === 2 &&
+  reimported[1].slides.length === 1,
+  `페이지 ${reimported.length}개`)
+check('페이지 제목 왕복 보존', reimported[0].title === '첫 페이지')
 check('제목·설명 보존',
-  reimported[0].title === '안내' && reimported[0].body === '설명입니다')
-check('선택지 설명 보존', reimported[1].options[0].description === '가')
-check('복수 선택 여부 보존', reimported[1].multi === true && reimported[0].multi === false)
+  reimported[0].slides[0].title === '안내' && reimported[0].slides[0].body === '설명입니다')
+check('선택지 설명 보존', reimported[0].slides[1].options[0].description === '가')
+check('복수 선택 여부 보존',
+  reimported[0].slides[1].multi === true && reimported[0].slides[0].multi === false)
+
+// 예전 형식 (페이지 열 없음) — 문항마다 페이지가 하나씩 생겨 예전과 같은 진행이 됩니다.
+const legacyFile = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(
+  legacyFile,
+  XLSX.utils.json_to_sheet([
+    { 유형: '안내 페이지', 제목: '안내', 선택지: '' },
+    { 유형: '주관식', 제목: '의견', 선택지: '' },
+  ]),
+  '문항',
+)
+const legacyPages = await excel.parseSlideFile(asFile(legacyFile, 'l.xlsx'))
+check('페이지 열 없는 예전 파일 — 문항마다 페이지 하나',
+  legacyPages.length === 2 && legacyPages.every((p) => p.slides.length === 1),
+  `페이지 ${legacyPages.length}개`)
+
+// 병합된 셀은 두 번째 행부터 빈 값으로 읽힙니다 — 위 행과 같은 페이지로 봅니다.
+const mergedFile = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(
+  mergedFile,
+  XLSX.utils.json_to_sheet([
+    { 페이지: 1, 유형: '주관식', 제목: '문항 A', 선택지: '' },
+    { 페이지: '', 유형: '주관식', 제목: '문항 B', 선택지: '' },
+    { 페이지: 2, 유형: '주관식', 제목: '문항 C', 선택지: '' },
+  ]),
+  '문항',
+)
+const mergedPages = await excel.parseSlideFile(asFile(mergedFile, 'm.xlsx'))
+check('페이지 칸이 비면 위 행과 같은 페이지',
+  mergedPages.length === 2 && mergedPages[0].slides.length === 2,
+  `페이지 ${mergedPages.length}개`)
 
 // 잘못된 파일은 조용히 넘어가지 않고 어디가 문제인지 알려줘야 합니다.
 const badType = XLSX.utils.book_new()

@@ -202,6 +202,14 @@ body {
   font-weight: 500;
 }
 
+/* 삭제처럼 위험하지만 화면에서 소리치면 안 되는 버튼. 색만 위험을 알립니다. */
+.btn--ghost-danger {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--danger);
+  font-weight: 500;
+}
+
 .btn--block {
   width: 100%;
 }
@@ -458,6 +466,41 @@ textarea {
 
 .text-answer {
   min-height: 140px;
+}
+
+/* --------------------------------------- 참가자 페이지 (문항 여러 개) */
+
+.pageview {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  flex: 1;
+}
+
+.pageview__title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+/* 문항 하나. 카드로 감싸 문항 사이 경계가 스크롤 중에도 잡히게 합니다. */
+.pageview__item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.pageview__num {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 항목별 자유 의견 */
@@ -844,6 +887,42 @@ textarea {
   white-space: pre-line;
 }
 
+/* 이 페이지에 담긴 문항들. 문항별 응답 수를 보고 넘길 타이밍을 잡습니다. */
+.current__slides {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.current__slide {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.current__slide-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current__slide-count {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
 .upnext {
   flex-direction: row;
   align-items: baseline;
@@ -917,16 +996,102 @@ textarea {
   gap: 12px;
 }
 
-.editor__add {
+/*
+ * 문항 추가 툴바 (예전의 .editor__add 를 대체).
+ * 스크롤과 상관없이 항상 상단에 붙어 있습니다 — 문항이 수십 개일 때
+ * 추가하러 맨 위로 되돌아가는 왕복을 없앱니다.
+ * (상단 고정 헤더 높이인 57px 아래에 붙습니다.)
+ */
+.editor__toolbar {
+  position: sticky;
+  top: 57px;
+  z-index: 15;
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  padding: 10px 12px;
+  margin: -4px -4px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.editor__toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.editor__toolbar-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.editor__pages {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 페이지 카드. 안에 문항 카드가 들어갑니다. */
+.page-card {
+  padding: 12px;
+  gap: 10px;
+  border-width: 1px;
+}
+
+.page-card--active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft), var(--shadow);
+}
+
+.page-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.page-card__index {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.page-card__title {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+
+.page-card__empty {
+  font-size: 0.85rem;
+  padding: 4px 2px;
 }
 
 .editor__list {
   list-style: none;
   padding: 0;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 페이지 안에 담긴 문항 카드는 한 단계 여리게 그립니다. */
+.slide-card--nested {
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: none;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1148,6 +1313,18 @@ textarea {
 
 .testrun__frame {
   max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 한 페이지에 문항이 여러 개면 참가자 화면처럼 사이에 경계를 둡니다. */
+.testrun__slide {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  gap: 8px;
 }
 
 .testrun__nav {
@@ -1290,4 +1467,63 @@ textarea {
   align-items: center;
   font-size: clamp(3rem, 9vw, 8rem);
   font-weight: 700;
+}
+
+/* ---------------------- 프리젠테이션 — 한 페이지에 문항이 여러 개일 때 */
+
+/*
+ * 문항이 하나면 화면 가운데 크게, 여럿이면 위에서부터 차곡차곡 보여 주고
+ * 넘치면 스크롤합니다. 글자도 한 단계 줄입니다 — 화면에 문항이 다 들어와야
+ * 참가자가 "지금 몇 개를 답해야 하는지"를 한눈에 봅니다.
+ */
+.present__main--list {
+  justify-content: flex-start;
+  gap: 3vh;
+  overflow-y: auto;
+  padding-top: 2vh;
+}
+
+.present__page-title {
+  margin: 0;
+  font-size: clamp(1rem, 2vw, 1.6rem);
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.present__slide {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6vh;
+  padding-bottom: 3vh;
+  border-bottom: 1px solid var(--border);
+}
+
+.present__slide:last-of-type {
+  border-bottom: none;
+}
+
+.present__main--list .present__title {
+  font-size: clamp(1.5rem, 3.4vw, 3rem);
+}
+
+.present__main--list .present__body {
+  font-size: clamp(1rem, 1.8vw, 1.6rem);
+}
+
+.present__main--list .present__options {
+  font-size: clamp(1rem, 1.9vw, 1.8rem);
+  gap: 1vh;
+}
+
+.present__main--list .present__options li {
+  padding: 1vh 1.6vw;
+}
+
+.present__main--list .present__options--ox li {
+  font-size: clamp(1.6rem, 4vw, 3.4rem);
+}
+
+.present__scroll-hint {
+  text-align: center;
+  padding-bottom: 2vh;
 }

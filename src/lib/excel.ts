@@ -1,9 +1,11 @@
 import * as XLSX from 'xlsx'
 import {
   answerToText,
+  orderSlides,
   slideOptions,
   SLIDE_TYPE_LABEL,
   type AdminParticipant,
+  type Page,
   type ResponseRow,
   type Slide,
   type SlideOption,
@@ -173,7 +175,18 @@ export interface SlideImportRow {
   multi: boolean
 }
 
+/** 가져온 파일의 페이지 하나. 문항 여러 개를 담습니다. */
+export interface PageImport {
+  title: string
+  slides: SlideImportRow[]
+}
+
 const SLIDE_HEADER_ALIASES: Record<string, string> = {
+  페이지: 'page',
+  page: 'page',
+  페이지제목: 'pageTitle',
+  '페이지 제목': 'pageTitle',
+  pagetitle: 'pageTitle',
   유형: 'type',
   type: 'type',
   종류: 'type',
@@ -191,7 +204,7 @@ const SLIDE_HEADER_ALIASES: Record<string, string> = {
   multi: 'multi',
 }
 
-export async function parseSlideFile(file: File): Promise<SlideImportRow[]> {
+export async function parseSlideFile(file: File): Promise<PageImport[]> {
   const buffer = await file.arrayBuffer()
 
   const workbook = file.name.toLowerCase().endsWith('.csv')
@@ -215,11 +228,21 @@ export async function parseSlideFile(file: File): Promise<SlideImportRow[]> {
   if (!fields.includes('type') || !fields.includes('title')) {
     throw new Error(
       '필요한 열을 찾지 못했습니다: 유형, 제목\n' +
-        '첫 줄 헤더를 "유형, 제목, 설명, 선택지, 복수선택" 으로 맞춰 주세요.',
+        '첫 줄 헤더를 "페이지, 유형, 제목, 설명, 선택지, 복수선택" 으로 맞춰 주세요.',
     )
   }
+  const hasPageColumn = fields.includes('page')
 
-  const rows: SlideImportRow[] = []
+  /*
+   * 페이지 열의 값이 같은 행끼리 한 페이지가 됩니다. 셀을 병합해 저장하면
+   * 두 번째 행부터는 빈 값으로 읽히므로, 빈 칸은 "위 행과 같은 페이지"로
+   * 봅니다. 페이지 열이 아예 없는 파일(예전 형식)은 문항마다 페이지를 하나씩
+   * 만들어 예전과 같은 진행이 되게 합니다.
+   */
+  const pages: PageImport[] = []
+  const pageByKey = new Map<string, PageImport>()
+  let lastKey: string | null = null
+
   raw.forEach((record, i) => {
     const cell: Record<string, string> = {}
     for (const [header, field] of mapping) {
@@ -242,7 +265,7 @@ export async function parseSlideFile(file: File): Promise<SlideImportRow[]> {
       throw new Error(`${i + 2}행: 다지선다인데 선택지가 없습니다.`)
     }
 
-    rows.push({
+    const slide: SlideImportRow = {
       type,
       title: cell.title,
       body: cell.body ?? '',
@@ -250,24 +273,44 @@ export async function parseSlideFile(file: File): Promise<SlideImportRow[]> {
         ? [{ label: 'O' }, { label: 'X' }]
         : options,
       multi: /^(o|y|yes|true|1|예|О)$/i.test(cell.multi ?? ''),
-    })
+    }
+
+    const key = hasPageColumn
+      ? (cell.page || lastKey || `행${i}`)
+      : `행${i}`  // 페이지 열이 없으면 문항마다 새 페이지
+    lastKey = key
+
+    let page = pageByKey.get(key)
+    if (!page) {
+      page = { title: '', slides: [] }
+      pageByKey.set(key, page)
+      pages.push(page)
+    }
+    if (!page.title && cell.pageTitle) page.title = cell.pageTitle
+    page.slides.push(slide)
   })
 
-  if (rows.length === 0) throw new Error('유효한 문항 행이 없습니다.')
-  return rows
+  if (pages.length === 0) throw new Error('유효한 문항 행이 없습니다.')
+  return pages
 }
 
 /** 내보낸 파일을 그대로 다시 가져올 수 있는 형식으로 만듭니다. */
-export function buildSlideWorkbook(slides: Slide[]): XLSX.WorkBook {
-  const rows = [...slides]
-    .sort((a, b) => a.order_index - b.order_index)
-    .map((slide) => ({
-      유형: SLIDE_TYPE_LABEL[slide.type],
-      제목: slide.title,
-      설명: slide.body ?? '',
-      선택지: optionsToCell(slideOptions(slide.options)),
-      복수선택: slide.multi ? 'O' : '',
-    }))
+export function buildSlideWorkbook(pages: Page[], slides: Slide[]): XLSX.WorkBook {
+  const sorted = [...pages].sort((a, b) => a.order_index - b.order_index)
+  const rows = sorted.flatMap((page, pageNo) =>
+    slides
+      .filter((s) => s.page_id === page.id)
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((slide) => ({
+        페이지: pageNo + 1,
+        페이지제목: page.title ?? '',
+        유형: SLIDE_TYPE_LABEL[slide.type],
+        제목: slide.title,
+        설명: slide.body ?? '',
+        선택지: optionsToCell(slideOptions(slide.options)),
+        복수선택: slide.multi ? 'O' : '',
+      })),
+  )
 
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '문항')
@@ -280,6 +323,8 @@ export function buildSlideTemplate(): XLSX.WorkBook {
     workbook,
     XLSX.utils.json_to_sheet([
       {
+        페이지: 1,
+        페이지제목: '안내',
         유형: '안내 페이지',
         제목: '설문 안내',
         설명: '지금부터 설문을 시작하겠습니다.',
@@ -287,6 +332,8 @@ export function buildSlideTemplate(): XLSX.WorkBook {
         복수선택: '',
       },
       {
+        페이지: 2,
+        페이지제목: '만족도',
         유형: '다지선다',
         제목: '이번 세션은 어떠셨나요?',
         설명: '',
@@ -294,6 +341,9 @@ export function buildSlideTemplate(): XLSX.WorkBook {
         복수선택: '',
       },
       {
+        // 페이지 값이 같으면 위 문항과 같은 페이지에 함께 나옵니다.
+        페이지: 2,
+        페이지제목: '',
         유형: 'OX',
         제목: '다음에도 참여하시겠습니까?',
         설명: '',
@@ -301,6 +351,8 @@ export function buildSlideTemplate(): XLSX.WorkBook {
         복수선택: '',
       },
       {
+        페이지: 3,
+        페이지제목: '',
         유형: '주관식',
         제목: '자유롭게 의견을 남겨 주세요',
         설명: '',
@@ -334,13 +386,14 @@ function formatTimestamp(iso: string | null): string {
  *  - "문항"       : 문항 정의 백업.
  */
 export function buildWorkbook(params: {
+  pages: Page[]
   slides: Slide[]
   participants: AdminParticipant[]
   responses: ResponseRow[]
   /** 여러 세션을 한 파일에 담을 때 세션 이름 열을 넣습니다. */
   includeSession?: boolean
 }): XLSX.WorkBook {
-  const { slides, participants, responses, includeSession = false } = params
+  const { pages, slides, participants, responses, includeSession = false } = params
 
   /** 세션 열은 여러 세션이 섞일 때만 의미가 있습니다. */
   const who = (p: AdminParticipant): Record<string, string> =>
@@ -348,17 +401,23 @@ export function buildWorkbook(params: {
       ? { 세션: p.session_name ?? '', 이름: p.display_name, 아이디: p.login_id }
       : { 이름: p.display_name, 아이디: p.login_id }
 
-  // 안내 페이지는 응답이 없으므로 결과 시트에서 제외합니다.
-  const questionSlides = slides
-    .filter((s) => s.type !== 'info')
-    .sort((a, b) => a.order_index - b.order_index)
-
   const byKey = new Map<string, ResponseRow>()
   for (const r of responses) byKey.set(`${r.slide_id}::${r.participant_id}`, r)
 
   // 의견은 안내 페이지에도 남을 수 있으므로, 의견 열은 모든 항목을 대상으로
   // 합니다. 반대로 응답 열은 고를 것이 있는 항목만 대상입니다.
-  const allSlides = [...slides].sort((a, b) => a.order_index - b.order_index)
+  const allSlides = orderSlides(pages, slides)
+
+  // 안내 페이지는 응답이 없으므로 결과 시트에서 제외합니다.
+  const questionSlides = allSlides.filter((s) => s.type !== 'info')
+
+  /** 문항이 몇 번째 페이지에 있는지 (1부터). */
+  const pageNoById = new Map(
+    [...pages]
+      .sort((a, b) => a.order_index - b.order_index)
+      .map((p, i) => [p.id, i + 1]),
+  )
+  const pageNo = (slide: Slide): number => pageNoById.get(slide.page_id) ?? 0
 
   /* 가로 */
   const wide = participants.map((p) => {
@@ -390,6 +449,7 @@ export function buildWorkbook(params: {
 
       long.push({
         ...who(p),
+        페이지: pageNo(slide),
         문항번호: i + 1,
         문항: slide.title,
         유형: TYPE_LABEL[slide.type],
@@ -409,6 +469,7 @@ export function buildWorkbook(params: {
       const comment = byKey.get(`${slide.id}::${p.id}`)?.comment
       if (!comment) return
       comments.push({
+        페이지: pageNo(slide),
         문항번호: i + 1,
         문항: slide.title,
         ...who(p),
@@ -423,6 +484,7 @@ export function buildWorkbook(params: {
     const options = slideOptions(slide.options)
     return {
       순서: i + 1,
+      페이지: pageNo(slide),
       유형: TYPE_LABEL[slide.type],
       제목: slide.title,
       설명: slide.body ?? '',

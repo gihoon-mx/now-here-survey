@@ -70,12 +70,23 @@ const { data: session } = await admin
   .select()
   .single()
 
+// 진행 단위는 페이지이므로 페이지 2개를 만들고 문항을 하나씩 붙입니다.
 // PostgREST 는 배열 insert 시 모든 객체의 키 구성이 같아야 합니다.
-// (키가 어긋나면 통째로 거부되는데, 에러를 안 보면 슬라이드가 하나도 없는
+// (키가 어긋나면 통째로 거부되는데, 에러를 안 보면 페이지가 하나도 없는
 //  세션으로 조용히 테스트가 진행되어 버립니다.)
+const { data: pageRows, error: pagesErr } = await admin
+  .from('pages')
+  .insert([
+    { survey_id: survey.id, order_index: 0 },
+    { survey_id: survey.id, order_index: 1 },
+  ])
+  .select()
+check('페이지 2개 생성', !pagesErr, pagesErr?.message ?? '')
+const pagesSorted = (pageRows ?? []).sort((a, b) => a.order_index - b.order_index)
+
 const { error: slidesErr } = await admin.from('slides').insert([
-  { survey_id: survey.id, order_index: 0, type: 'info', title: '첫 항목',    options: [] },
-  { survey_id: survey.id, order_index: 1, type: 'ox',   title: '두번째 항목', options: ['O', 'X'] },
+  { survey_id: survey.id, page_id: pagesSorted[0]?.id, order_index: 0, type: 'info', title: '첫 항목',    options: [] },
+  { survey_id: survey.id, page_id: pagesSorted[1]?.id, order_index: 0, type: 'ox',   title: '두번째 항목', options: ['O', 'X'] },
 ])
 check('슬라이드 2개 생성', !slidesErr, slidesErr?.message ?? '')
 
@@ -165,19 +176,19 @@ const expectEvent = async (label, action, predicate, timeoutMs = 10000) => {
 await expectEvent(
   '세션 시작이 참가자에게 전달됨',
   () => admin.rpc('start_session', { p_session_id: session.id }),
-  (row) => row.status === 'live' && row.current_slide_index === 0,
+  (row) => row.status === 'live' && row.current_page_index === 0,
 )
 
 await expectEvent(
-  '다음 항목 이동이 전달됨',
-  () => admin.rpc('move_slide', { p_session_id: session.id, p_delta: 1 }),
-  (row) => row.current_slide_index === 1,
+  '다음 페이지 이동이 전달됨',
+  () => admin.rpc('move_page', { p_session_id: session.id, p_delta: 1 }),
+  (row) => row.current_page_index === 1,
 )
 
 await expectEvent(
   '이전으로 돌아가기도 전달됨',
-  () => admin.rpc('move_slide', { p_session_id: session.id, p_delta: -1 }),
-  (row) => row.current_slide_index === 0,
+  () => admin.rpc('move_page', { p_session_id: session.id, p_delta: -1 }),
+  (row) => row.current_page_index === 0,
 )
 
 await expectEvent(
@@ -186,9 +197,9 @@ await expectEvent(
   (row) => row.status === 'ended',
 )
 
-// 슬라이드마다 서버가 시각을 다시 찍는지 (경과 시간 표시의 근거)
-const stamps = new Set(events.map((e) => e.row.current_slide_started_at))
-check('항목마다 서버 시각이 갱신됨', stamps.size >= 3, `서로 다른 시각 ${stamps.size}개`)
+// 페이지마다 서버가 시각을 다시 찍는지 (경과 시간 표시의 근거)
+const stamps = new Set(events.map((e) => e.row.current_page_started_at))
+check('페이지마다 서버 시각이 갱신됨', stamps.size >= 3, `서로 다른 시각 ${stamps.size}개`)
 
 /* ------------------------------------------------------------- 정리 */
 console.log('\n[4] 정리')
@@ -200,7 +211,7 @@ console.log(`\n받은 이벤트 ${events.length}건`)
 const t0 = events[0]?.at ?? Date.now()
 for (const e of events) {
   console.log(
-    `  +${String(e.at - t0).padStart(6)}ms  status=${e.row.status} index=${e.row.current_slide_index}`,
+    `  +${String(e.at - t0).padStart(6)}ms  status=${e.row.status} page=${e.row.current_page_index}`,
   )
 }
 console.log(`===== ${pass} passed, ${fail} failed =====`)

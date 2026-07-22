@@ -114,6 +114,7 @@ function SurveyList() {
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(true)
   const [copying, setCopying] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
@@ -160,6 +161,46 @@ function SurveyList() {
     else if (data) navigate(`/admin/${data as string}`)
   }
 
+  /**
+   * 설문 삭제. 문항·세션·참가자·응답이 모두 연쇄 삭제되고 되돌릴 수 없으므로
+   * 두 번 확인합니다. 진행 중인 세션이 있으면 막습니다 — 현장에서 참가자들이
+   * 응답하는 중에 발밑이 사라지는 사고를 방지합니다.
+   */
+  const remove = async (survey: Survey) => {
+    setError(null)
+    setRemoving(survey.id)
+    try {
+      const { count } = await supabase
+        .from('sessions')
+        .select('id', { count: 'exact', head: true })
+        .eq('survey_id', survey.id)
+        .eq('status', 'live')
+      if ((count ?? 0) > 0) {
+        setError('진행 중인 세션이 있는 설문은 삭제할 수 없습니다. 먼저 세션을 종료해 주세요.')
+        return
+      }
+
+      if (
+        !confirm(
+          `"${survey.title}" 설문을 삭제할까요?\n` +
+            '문항, 모든 세션, 참가자 명단, 받은 응답이 함께 지워집니다.',
+        )
+      )
+        return
+      if (!confirm('되돌릴 수 없습니다. 결과가 필요하면 먼저 엑셀로 내려받으세요.\n정말 삭제할까요?'))
+        return
+
+      const { error: deleteError } = await supabase
+        .from('surveys')
+        .delete()
+        .eq('id', survey.id)
+      if (deleteError) setError(deleteError.message)
+      else await load()
+    } finally {
+      setRemoving(null)
+    }
+  }
+
   return (
     <div className="screen admin">
       <header className="admin__header">
@@ -201,6 +242,14 @@ function SurveyList() {
                 onClick={() => duplicate(s)}
               >
                 {copying === s.id ? '복사 중…' : '복사'}
+              </button>
+              <button
+                className="btn btn--sm btn--ghost-danger"
+                title="설문 삭제 (세션·참가자·응답 포함)"
+                disabled={removing === s.id}
+                onClick={() => remove(s)}
+              >
+                {removing === s.id ? '삭제 중…' : '삭제'}
               </button>
             </li>
           ))}

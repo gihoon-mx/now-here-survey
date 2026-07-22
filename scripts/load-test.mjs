@@ -111,10 +111,27 @@ if (sErr) {
   process.exit(1)
 }
 
+// 진행 단위는 페이지입니다. 실제 진행처럼 페이지마다 문항을 하나씩 둡니다.
+const { data: pageRows, error: pgErr } = await admin
+  .from('pages')
+  .insert(
+    Array.from({ length: SLIDES }, (_, i) => ({
+      survey_id: survey.id,
+      order_index: i,
+    })),
+  )
+  .select()
+if (pgErr) {
+  console.error('페이지 생성 실패:', pgErr.message)
+  process.exit(1)
+}
+const pagesSorted = (pageRows ?? []).sort((a, b) => a.order_index - b.order_index)
+
 await admin.from('slides').insert(
   Array.from({ length: SLIDES }, (_, i) => ({
     survey_id: survey.id,
-    order_index: i,
+    page_id: pagesSorted[i].id,
+    order_index: 0,
     type: 'choice',
     title: `부하테스트 문항 ${i + 1}`,
     body: null,
@@ -123,11 +140,12 @@ await admin.from('slides').insert(
   })),
 )
 
-const { data: slides } = await admin
+// 페이지 순서대로 문항을 폅니다 (페이지당 하나).
+const { data: slideRows } = await admin
   .from('slides')
-  .select('id, order_index')
+  .select('id, page_id')
   .eq('survey_id', survey.id)
-  .order('order_index')
+const slides = pagesSorted.map((p) => slideRows.find((s) => s.page_id === p.id))
 
 await admin.from('participants').insert(
   Array.from({ length: PARTICIPANTS }, (_, i) => ({
@@ -259,7 +277,7 @@ if (missedStart.length > 0) {
 }
 
 /* ------------------------------------------ 3. 동시 응답 + 이동 */
-console.log('\n[3] 문항별 동시 응답 + 다음 항목 이동')
+console.log('\n[3] 페이지별 동시 응답 + 다음 페이지 이동')
 
 const submitLatencies = []
 const moveLatencies = []
@@ -286,17 +304,17 @@ for (let s = 0; s < slides.length; s++) {
   if (s < slides.length - 1) {
     for (const c of connected) c.events.length = 0
     const moveAt = Date.now()
-    await admin.rpc('move_slide', { p_session_id: session.id, p_delta: 1 })
+    await admin.rpc('move_page', { p_session_id: session.id, p_delta: 1 })
     await wait(3000)
     for (const c of connected) {
-      const hit = c.events.find((e) => e.row.current_slide_index === s + 1)
+      const hit = c.events.find((e) => e.row.current_page_index === s + 1)
       moveLatencies.push(hit ? hit.at - moveAt : undefined)
     }
   }
 }
 
 report('응답 저장', submitLatencies)
-report('다음 항목 도달', moveLatencies)
+report('다음 페이지 도달', moveLatencies)
 
 if (submitErrors.length > 0) {
   console.log(`\n  ⚠️ 응답 실패 ${submitErrors.length}건:`)

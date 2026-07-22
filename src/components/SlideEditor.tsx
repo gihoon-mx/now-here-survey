@@ -11,6 +11,7 @@ import {
   SLIDE_TYPE_LABEL,
   slideOptions,
   type Answer,
+  type Page,
   type Slide,
   type SlideOption,
   type SlideType,
@@ -29,9 +30,12 @@ const DEFAULT_OPTIONS: Record<SlideType, SlideOption[]> = {
 }
 
 export default function SlideEditor({ surveyId }: { surveyId: string }) {
+  const [pages, setPages] = useState<Page[]>([])
   const [slides, setSlides] = useState<Slide[]>([])
   const [loading, setLoading] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
+  /** 상단 고정 툴바의 문항 추가 버튼이 어느 페이지에 넣을지. */
+  const [activePageId, setActivePageId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -41,12 +45,19 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
   const importMode = useRef<'replace' | 'append'>('append')
 
   const load = async () => {
-    const { data } = await supabase
-      .from('slides')
-      .select('*')
-      .eq('survey_id', surveyId)
-      .order('order_index')
-    setSlides((data as Slide[]) ?? [])
+    const [pageRes, slideRes] = await Promise.all([
+      supabase.from('pages').select('*').eq('survey_id', surveyId).order('order_index'),
+      supabase.from('slides').select('*').eq('survey_id', surveyId).order('order_index'),
+    ])
+    const loadedPages = (pageRes.data as Page[]) ?? []
+    setPages(loadedPages)
+    setSlides((slideRes.data as Slide[]) ?? [])
+    // 활성 페이지가 사라졌으면 마지막 페이지로 옮깁니다.
+    setActivePageId((prev) =>
+      prev && loadedPages.some((p) => p.id === prev)
+        ? prev
+        : loadedPages.at(-1)?.id ?? null,
+    )
     setLoading(false)
   }
 
@@ -54,13 +65,91 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
     void load()
   }, [surveyId])
 
-  const add = async (type: SlideType) => {
+  const pageSlides = (pageId: string) =>
+    slides
+      .filter((s) => s.page_id === pageId)
+      .sort((a, b) => a.order_index - b.order_index)
+
+  /* ------------------------------------------------------------ 페이지 */
+
+  const addPage = async (): Promise<Page | null> => {
     setError(null)
+    const { data, error: insertError } = await supabase
+      .from('pages')
+      .insert({ survey_id: surveyId, order_index: pages.length })
+      .select()
+      .single()
+    if (insertError) {
+      setError(insertError.message)
+      return null
+    }
+    const page = data as Page
+    setPages((prev) => [...prev, page])
+    setActivePageId(page.id)
+    return page
+  }
+
+  const patchPage = async (id: string, changes: Partial<Page>) => {
+    setPages((prev) => prev.map((p) => (p.id === id ? { ...p, ...changes } : p)))
+    const { error: updateError } = await supabase.from('pages').update(changes).eq('id', id)
+    if (updateError) setError(updateError.message)
+  }
+
+  const removePage = async (page: Page) => {
+    const count = pageSlides(page.id).length
+    if (
+      !confirm(
+        `이 페이지를 삭제할까요?` +
+          (count > 0 ? `\n안의 문항 ${count}개와 받은 응답도 함께 지워집니다.` : ''),
+      )
+    )
+      return
+    await supabase.from('pages').delete().eq('id', page.id)
+    const remaining = pages.filter((p) => p.id !== page.id)
+    await renumberPages(remaining)
+    setSlides((prev) => prev.filter((s) => s.page_id !== page.id))
+  }
+
+  const movePage = async (id: string, delta: number) => {
+    const from = pages.findIndex((p) => p.id === id)
+    const to = from + delta
+    if (from < 0 || to < 0 || to >= pages.length) return
+    const reordered = [...pages]
+    const [moved] = reordered.splice(from, 1)
+    reordered.splice(to, 0, moved)
+    await renumberPages(reordered)
+  }
+
+  /** 페이지 순번을 0..n-1 로 다시 채우고 화면에도 반영합니다. */
+  const renumberPages = async (ordered: Page[]) => {
+    setPages(ordered.map((p, i) => ({ ...p, order_index: i })))
+    await Promise.all(
+      ordered.map((p, i) =>
+        p.order_index === i
+          ? Promise.resolve()
+          : supabase.from('pages').update({ order_index: i }).eq('id', p.id),
+      ),
+    )
+  }
+
+  /* ------------------------------------------------------------- 문항 */
+
+  const addSlide = async (type: SlideType) => {
+    setError(null)
+    // 페이지가 없으면 먼저 하나 만들어 그 안에 넣습니다.
+    let pageId = activePageId ?? pages.at(-1)?.id ?? null
+    if (!pageId) {
+      const page = await addPage()
+      if (!page) return
+      pageId = page.id
+    }
+
     const { data, error: insertError } = await supabase
       .from('slides')
       .insert({
         survey_id: surveyId,
-        order_index: slides.length,
+        page_id: pageId,
+        order_index: pageSlides(pageId).length,
         type,
         title: '',
         options: DEFAULT_OPTIONS[type],
@@ -85,33 +174,60 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
     if (updateError) setError(updateError.message)
   }
 
-  const remove = async (id: string) => {
+  const remove = async (slide: Slide) => {
     if (!confirm('이 항목을 삭제할까요? 이미 받은 응답도 함께 지워집니다.')) return
-    await supabase.from('slides').delete().eq('id', id)
-    // 남은 항목의 순번을 0..n-1 로 다시 채웁니다.
-    const remaining = slides.filter((s) => s.id !== id)
-    await Promise.all(
-      remaining.map((s, i) =>
-        s.order_index === i
-          ? Promise.resolve()
-          : supabase.from('slides').update({ order_index: i }).eq('id', s.id),
-      ),
-    )
-    setSlides(remaining.map((s, i) => ({ ...s, order_index: i })))
+    await supabase.from('slides').delete().eq('id', slide.id)
+    const remaining = pageSlides(slide.page_id).filter((s) => s.id !== slide.id)
+    setSlides((prev) => prev.filter((s) => s.id !== slide.id))
+    await renumberSlides(slide.page_id, remaining)
   }
 
-  const move = async (id: string, delta: number) => {
-    const from = slides.findIndex((s) => s.id === id)
-    const to = from + delta
-    if (from < 0 || to < 0 || to >= slides.length) return
+  /**
+   * 페이지 안에서는 위아래로 자리를 바꾸고, 페이지 경계에 닿으면
+   * 인접 페이지로 넘어갑니다 — 문항을 다른 페이지로 옮길 때 씁니다.
+   */
+  const moveSlide = async (slide: Slide, delta: number) => {
+    const inPage = pageSlides(slide.page_id)
+    const idx = inPage.findIndex((s) => s.id === slide.id)
+    const to = idx + delta
 
-    const reordered = [...slides]
-    const [moved] = reordered.splice(from, 1)
-    reordered.splice(to, 0, moved)
+    if (to >= 0 && to < inPage.length) {
+      const reordered = [...inPage]
+      const [moved] = reordered.splice(idx, 1)
+      reordered.splice(to, 0, moved)
+      await renumberSlides(slide.page_id, reordered)
+      return
+    }
 
-    setSlides(reordered.map((s, i) => ({ ...s, order_index: i })))
+    // 페이지 경계를 넘습니다.
+    const pageIdx = pages.findIndex((p) => p.id === slide.page_id)
+    const target = pages[pageIdx + delta]
+    if (!target) return
+
+    const targetSlides = pageSlides(target.id)
+    const rest = inPage.filter((s) => s.id !== slide.id)
+    const movedSlide = { ...slide, page_id: target.id }
+    const nextTarget =
+      delta > 0 ? [movedSlide, ...targetSlides] : [...targetSlides, movedSlide]
+
+    setSlides((prev) =>
+      prev.map((s) => (s.id === slide.id ? { ...s, page_id: target.id } : s)),
+    )
+    await supabase.from('slides').update({ page_id: target.id }).eq('id', slide.id)
+    await renumberSlides(slide.page_id, rest)
+    await renumberSlides(target.id, nextTarget)
+  }
+
+  /** 한 페이지 안의 문항 순번을 0..n-1 로 다시 채웁니다. */
+  const renumberSlides = async (pageId: string, ordered: Slide[]) => {
+    setSlides((prev) =>
+      prev.map((s) => {
+        const i = ordered.findIndex((o) => o.id === s.id)
+        return i >= 0 ? { ...s, page_id: pageId, order_index: i } : s
+      }),
+    )
     await Promise.all(
-      reordered.map((s, i) =>
+      ordered.map((s, i) =>
         supabase.from('slides').update({ order_index: i }).eq('id', s.id),
       ),
     )
@@ -126,33 +242,52 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
 
     try {
       const parsed = await parseSlideFile(file)
+      const slideCount = parsed.reduce((n, p) => n + p.slides.length, 0)
 
       if (mode === 'replace') {
         if (
           !confirm(
-            `기존 문항 ${slides.length}개를 지우고 ${parsed.length}개로 교체합니다.\n` +
+            `기존 문항 ${slides.length}개를 지우고 ${slideCount}개로 교체합니다.\n` +
               '이미 받은 응답도 함께 지워집니다. 계속할까요?',
           )
         )
           return
-        await supabase.from('slides').delete().eq('survey_id', surveyId)
+        await supabase.from('pages').delete().eq('survey_id', surveyId)
       }
 
-      const base = mode === 'replace' ? 0 : slides.length
+      const base = mode === 'replace' ? 0 : pages.length
+
+      // 페이지를 먼저 만들고, 문항을 각 페이지에 붙입니다.
+      const { data: newPages, error: pageError } = await supabase
+        .from('pages')
+        .insert(
+          parsed.map((page, i) => ({
+            survey_id: surveyId,
+            order_index: base + i,
+            title: page.title || null,
+          })),
+        )
+        .select()
+      if (pageError) throw new Error(pageError.message)
+
+      const created = (newPages as Page[]).sort((a, b) => a.order_index - b.order_index)
       const { error: insertError } = await supabase.from('slides').insert(
-        parsed.map((row, i) => ({
-          survey_id: surveyId,
-          order_index: base + i,
-          type: row.type,
-          title: row.title,
-          body: row.body || null,
-          options: row.options,
-          multi: row.multi,
-        })),
+        parsed.flatMap((page, i) =>
+          page.slides.map((row, j) => ({
+            survey_id: surveyId,
+            page_id: created[i].id,
+            order_index: j,
+            type: row.type,
+            title: row.title,
+            body: row.body || null,
+            options: row.options,
+            multi: row.multi,
+          })),
+        ),
       )
       if (insertError) throw new Error(insertError.message)
 
-      setNotice(`문항 ${parsed.length}개를 가져왔습니다.`)
+      setNotice(`페이지 ${parsed.length}개, 문항 ${slideCount}개를 가져왔습니다.`)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : '가져오기에 실패했습니다.')
@@ -164,21 +299,39 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
 
   if (loading) return <p className="muted">불러오는 중…</p>
 
+  const activeIndex = pages.findIndex((p) => p.id === activePageId)
+
   return (
     <div className="editor">
-      <div className="editor__add">
+      {/*
+       * 문항 추가 버튼은 스크롤과 상관없이 항상 위에 붙어 있습니다.
+       * 문항이 수십 개로 늘면 목록 아래에서 추가하러 맨 위나 맨 아래로
+       * 오가는 일이 잦은데, 그 왕복을 없앱니다.
+       */}
+      <div className="editor__toolbar">
+        <button className="btn btn--sm btn--primary" onClick={() => void addPage()}>
+          + 페이지
+        </button>
+        <span className="editor__toolbar-sep" />
         {(Object.keys(SLIDE_TYPE_LABEL) as SlideType[]).map((type) => (
-          <button key={type} className="btn btn--sm" onClick={() => add(type)}>
+          <button key={type} className="btn btn--sm" onClick={() => void addSlide(type)}>
             + {SLIDE_TYPE_LABEL[type]}
           </button>
         ))}
+        {pages.length > 0 && (
+          <span className="editor__toolbar-hint">
+            문항은 {activeIndex >= 0 ? `${activeIndex + 1}페이지` : '마지막 페이지'}에
+            추가됩니다
+          </span>
+        )}
       </div>
 
       <div className="card">
         <h2>파일로 문항 관리</h2>
         <p className="muted">
-          엑셀(.xlsx) 또는 CSV. 선택지는 <code>|</code> 로 구분하고, 설명을 붙일
-          때는 <code>라벨 :: 설명</code> 으로 씁니다.
+          엑셀(.xlsx) 또는 CSV. <code>페이지</code> 열의 값이 같은 문항이 한 페이지에
+          함께 나옵니다. 선택지는 <code>|</code> 로 구분하고, 설명을 붙일 때는{' '}
+          <code>라벨 :: 설명</code> 으로 씁니다.
           <br />
           내보낸 파일은 그대로 다시 가져올 수 있습니다.
         </p>
@@ -193,7 +346,7 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
             <button
               className="btn btn--sm"
               onClick={() =>
-                downloadWorkbook(buildSlideWorkbook(slides), '문항.xlsx')
+                downloadWorkbook(buildSlideWorkbook(pages, slides), '문항.xlsx')
               }
             >
               문항 내보내기
@@ -237,52 +390,127 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
       {error && <p className="error">{error}</p>}
       {notice && <p className="notice">{notice}</p>}
 
-      {slides.length === 0 && (
-        <p className="muted">위 버튼으로 항목을 추가해 주세요.</p>
+      {pages.length === 0 && (
+        <p className="muted">
+          위 버튼으로 페이지나 문항을 추가해 주세요. 문항을 바로 추가하면 첫
+          페이지가 함께 만들어집니다.
+        </p>
       )}
 
-      <ol className="editor__list">
-        {slides.map((slide, i) => (
-          <li key={slide.id} className="card slide-card">
-            <div className="slide-card__head">
-              <span className="slide-card__index">{i + 1}</span>
-              <button
-                className="slide-card__summary"
-                onClick={() => setOpenId(openId === slide.id ? null : slide.id)}
-              >
-                <span className={`slide-card__type slide-card__type--${slide.type}`}>
-                  {SLIDE_TYPE_LABEL[slide.type]}
-                </span>
-                <span
-                  className={
-                    'slide-card__title' + (slide.title ? '' : ' slide-card__title--empty')
-                  }
-                >
-                  {slide.title || '(제목 없음)'}
-                </span>
-              </button>
-              <div className="slide-card__tools">
-                <button className="icon-btn" title="위로" onClick={() => move(slide.id, -1)}>
-                  ↑
-                </button>
-                <button className="icon-btn" title="아래로" onClick={() => move(slide.id, 1)}>
-                  ↓
-                </button>
-                <button
-                  className="icon-btn icon-btn--danger"
-                  title="삭제"
-                  onClick={() => remove(slide.id)}
-                >
-                  ✕
-                </button>
+      <ol className="editor__pages">
+        {pages.map((page, pageNo) => {
+          const inPage = pageSlides(page.id)
+          return (
+            <li
+              key={page.id}
+              className={
+                'card page-card' + (page.id === activePageId ? ' page-card--active' : '')
+              }
+              onClick={() => setActivePageId(page.id)}
+            >
+              <div className="page-card__head">
+                <span className="page-card__index">{pageNo + 1}페이지</span>
+                <input
+                  className="page-card__title"
+                  value={page.title ?? ''}
+                  placeholder="페이지 제목 (선택)"
+                  onChange={(e) => void patchPage(page.id, { title: e.target.value })}
+                />
+                <div className="slide-card__tools">
+                  <button
+                    className="icon-btn"
+                    title="페이지 위로"
+                    onClick={() => void movePage(page.id, -1)}
+                    disabled={pageNo === 0}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="페이지 아래로"
+                    onClick={() => void movePage(page.id, 1)}
+                    disabled={pageNo === pages.length - 1}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="icon-btn icon-btn--danger"
+                    title="페이지 삭제"
+                    onClick={() => void removePage(page)}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {openId === slide.id && (
-              <SlideForm slide={slide} onPatch={(c) => patch(slide.id, c)} />
-            )}
-          </li>
-        ))}
+              {inPage.length === 0 ? (
+                <p className="muted page-card__empty">
+                  문항이 없는 페이지입니다. 이 페이지를 누른 뒤 위의 문항 추가
+                  버튼을 쓰세요.
+                </p>
+              ) : (
+                <ol className="editor__list">
+                  {inPage.map((slide, i) => (
+                    <li key={slide.id} className="slide-card slide-card--nested">
+                      <div className="slide-card__head">
+                        <span className="slide-card__index">{i + 1}</span>
+                        <button
+                          className="slide-card__summary"
+                          onClick={() => setOpenId(openId === slide.id ? null : slide.id)}
+                        >
+                          <span
+                            className={`slide-card__type slide-card__type--${slide.type}`}
+                          >
+                            {SLIDE_TYPE_LABEL[slide.type]}
+                          </span>
+                          <span
+                            className={
+                              'slide-card__title' +
+                              (slide.title ? '' : ' slide-card__title--empty')
+                            }
+                          >
+                            {slide.title || '(제목 없음)'}
+                          </span>
+                        </button>
+                        <div className="slide-card__tools">
+                          <button
+                            className="icon-btn"
+                            title="위로 (페이지 맨 위에서는 앞 페이지로)"
+                            onClick={() => void moveSlide(slide, -1)}
+                            disabled={pageNo === 0 && i === 0}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            className="icon-btn"
+                            title="아래로 (페이지 맨 아래에서는 다음 페이지로)"
+                            onClick={() => void moveSlide(slide, 1)}
+                            disabled={
+                              pageNo === pages.length - 1 && i === inPage.length - 1
+                            }
+                          >
+                            ↓
+                          </button>
+                          <button
+                            className="icon-btn icon-btn--danger"
+                            title="삭제"
+                            onClick={() => void remove(slide)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+
+                      {openId === slide.id && (
+                        <SlideForm slide={slide} onPatch={(c) => patch(slide.id, c)} />
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </li>
+          )
+        })}
       </ol>
     </div>
   )

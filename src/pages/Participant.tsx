@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useLiveSession } from '../lib/useLiveSession'
 import { SlideView } from '../components/SlideView'
-import type { Answer, Participant, Slide } from '../lib/types'
+import type { Answer, Page, Participant, Slide } from '../lib/types'
 
 export default function ParticipantPage() {
   const [booting, setBooting] = useState(true)
@@ -136,18 +136,20 @@ function LoginForm({ onLoggedIn }: { onLoggedIn: (p: Participant) => void }) {
 
 /* ------------------------------------------------------------- 진행 화면 */
 
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+
 function LiveView({ participant }: { participant: Participant }) {
   const { session } = useLiveSession(participant.session_id)
   const [surveyTitle, setSurveyTitle] = useState('')
-  const [slide, setSlide] = useState<Slide | null>(null)
-  const [answer, setAnswer] = useState<Answer | null>(null)
-  const [comment, setComment] = useState('')
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>(
-    'idle',
-  )
+  const [page, setPage] = useState<Page | null>(null)
+  const [slides, setSlides] = useState<Slide[]>([])
+  // 페이지 안 문항마다 응답·의견·저장 상태를 따로 둡니다.
+  const [answers, setAnswers] = useState<Record<string, Answer | null>>({})
+  const [comments, setComments] = useState<Record<string, string>>({})
+  const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const index = session?.current_slide_index ?? null
+  const index = session?.current_page_index ?? null
   const live = session?.status === 'live'
 
   // 대기 화면에 보여 줄 설문 제목. RLS 로 자기 회차의 설문만 읽힙니다.
@@ -163,41 +165,62 @@ function LiveView({ participant }: { participant: Participant }) {
     })()
   }, [session?.survey_id])
 
-  // 슬라이드가 바뀔 때마다 문항과 "내가 이미 낸 응답"을 함께 불러옵니다.
+  // 페이지가 바뀔 때마다 그 페이지의 문항과 "내가 이미 낸 응답"을 불러옵니다.
   useEffect(() => {
     if (!live || index == null) {
-      setSlide(null)
+      setPage(null)
+      setSlides([])
       return
     }
     let cancelled = false
 
     void (async () => {
-      // 문항은 설문에 붙어 있습니다. RLS 가 "내 회차의 설문 중 진행된
+      // 페이지는 설문에 붙어 있습니다. RLS 가 "내 회차의 설문 중 진행된
       // 순번까지"만 보여 주므로, 순번만으로 안전하게 찾을 수 있습니다.
-      const { data: slideRow } = await supabase
-        .from('slides')
+      const { data: pageRow } = await supabase
+        .from('pages')
         .select('*')
         .eq('order_index', index)
         .maybeSingle()
 
       if (cancelled) return
-      setSlide((slideRow as Slide) ?? null)
-      setAnswer(null)
-      setComment('')
-      setSaveState('idle')
+      setPage((pageRow as Page) ?? null)
+      setAnswers({})
+      setComments({})
+      setSaveStates({})
       setSaveError(null)
 
-      if (slideRow) {
-        const { data: responseRow } = await supabase
-          .from('responses')
-          .select('answer, comment')
-          .eq('slide_id', (slideRow as Slide).id)
-          .eq('participant_id', participant.id)
-          .maybeSingle()
+      if (!pageRow) {
+        setSlides([])
+        return
+      }
 
-        if (!cancelled && responseRow) {
-          setAnswer((responseRow.answer as Answer) ?? null)
-          setComment(responseRow.comment ?? '')
+      const { data: slideRows } = await supabase
+        .from('slides')
+        .select('*')
+        .eq('page_id', (pageRow as Page).id)
+        .order('order_index')
+
+      if (cancelled) return
+      const loaded = (slideRows as Slide[]) ?? []
+      setSlides(loaded)
+
+      if (loaded.length > 0) {
+        const { data: responseRows } = await supabase
+          .from('responses')
+          .select('slide_id, answer, comment')
+          .in('slide_id', loaded.map((s) => s.id))
+          .eq('participant_id', participant.id)
+
+        if (!cancelled && responseRows) {
+          const nextAnswers: Record<string, Answer | null> = {}
+          const nextComments: Record<string, string> = {}
+          for (const row of responseRows) {
+            nextAnswers[row.slide_id as string] = (row.answer as Answer) ?? null
+            nextComments[row.slide_id as string] = (row.comment as string) ?? ''
+          }
+          setAnswers(nextAnswers)
+          setComments(nextComments)
         }
       }
     })()
@@ -207,56 +230,46 @@ function LiveView({ participant }: { participant: Participant }) {
     }
   }, [live, index, participant.session_id, participant.id])
 
-  const save = useCallback(
-    async (next: Answer) => {
-      if (!slide) return
-      setSaveState('saving')
-      setSaveError(null)
-
-      const { error } = await supabase.rpc('submit_response', {
-        p_slide_id: slide.id,
-        p_answer: next,
-      })
-
-      if (error) {
-        setSaveState('error')
-        setSaveError(error.message)
-      } else {
-        setSaveState('saved')
-      }
-    },
-    [slide],
-  )
+  const setSaveState = (slideId: string, state: SaveState) =>
+    setSaveStates((prev) => ({ ...prev, [slideId]: state }))
 
   // 화면에는 즉시 반영하고 저장은 뒤따르게 합니다 (탭 반응이 끊기지 않도록).
   const update = useCallback(
-    (next: Answer) => {
-      setAnswer(next)
-      void save(next)
+    (slideId: string, next: Answer) => {
+      setAnswers((prev) => ({ ...prev, [slideId]: next }))
+      setSaveState(slideId, 'saving')
+      setSaveError(null)
+      void supabase
+        .rpc('submit_response', { p_slide_id: slideId, p_answer: next })
+        .then(({ error }) => {
+          if (error) {
+            setSaveState(slideId, 'error')
+            setSaveError(error.message)
+          } else {
+            setSaveState(slideId, 'saved')
+          }
+        })
     },
-    [save],
+    [],
   )
 
   const updateComment = useCallback(
-    async (next: string) => {
-      setComment(next)
-      if (!slide) return
-      setSaveState('saving')
+    (slideId: string, next: string) => {
+      setComments((prev) => ({ ...prev, [slideId]: next }))
+      setSaveState(slideId, 'saving')
       setSaveError(null)
-
-      const { error } = await supabase.rpc('submit_comment', {
-        p_slide_id: slide.id,
-        p_comment: next,
-      })
-
-      if (error) {
-        setSaveState('error')
-        setSaveError(error.message)
-      } else {
-        setSaveState('saved')
-      }
+      void supabase
+        .rpc('submit_comment', { p_slide_id: slideId, p_comment: next })
+        .then(({ error }) => {
+          if (error) {
+            setSaveState(slideId, 'error')
+            setSaveError(error.message)
+          } else {
+            setSaveState(slideId, 'saved')
+          }
+        })
     },
-    [slide],
+    [],
   )
 
   if (!session) return <Centered>설문을 불러오는 중…</Centered>
@@ -280,29 +293,53 @@ function LiveView({ participant }: { participant: Participant }) {
       </Centered>
     )
 
-  if (!slide) return <Centered>다음 항목을 기다리는 중…</Centered>
+  if (!page || slides.length === 0)
+    return <Centered>다음 페이지를 기다리는 중…</Centered>
+
+  // 고를 것이 있는 문항 기준으로 페이지 전체의 진행을 요약합니다.
+  const questions = slides.filter((s) => s.type !== 'info')
+  const answered = questions.filter((s) => answers[s.id] != null).length
 
   return (
     <div className="screen">
       <header className="topbar">
         <span className="topbar__name">{participant.display_name}</span>
-        <SaveBadge state={saveState} type={slide.type} />
+        <PageBadge
+          states={Object.values(saveStates)}
+          answered={answered}
+          total={questions.length}
+        />
       </header>
 
-      <main className="slide">
-        <SlideView
-          slide={slide}
-          answer={answer}
-          onChange={update}
-          comment={comment}
-          onCommentChange={updateComment}
-        />
+      <main className="pageview">
+        {page.title && <h1 className="pageview__title">{page.title}</h1>}
+
+        {slides.map((slide, i) => (
+          <section key={slide.id} className="pageview__item">
+            {slides.length > 1 && (
+              <span className="pageview__num">
+                {i + 1} / {slides.length}
+              </span>
+            )}
+            <div className="slide">
+              <SlideView
+                slide={slide}
+                answer={answers[slide.id] ?? null}
+                onChange={(next) => update(slide.id, next)}
+                comment={comments[slide.id] ?? ''}
+                onCommentChange={(next) => updateComment(slide.id, next)}
+              />
+            </div>
+          </section>
+        ))}
 
         {saveError && <p className="error">{saveError}</p>}
 
-        {slide.type !== 'info' && (
+        {questions.length > 0 && (
           <p className="slide__note">
-            진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.
+            {questions.length > 1
+              ? '화면을 내리며 모든 문항에 답해 주세요. 진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'
+              : '진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'}
           </p>
         )}
       </main>
@@ -310,20 +347,31 @@ function LiveView({ participant }: { participant: Participant }) {
   )
 }
 
-function SaveBadge({
-  state,
-  type,
+/**
+ * 페이지 전체의 저장 상태 요약. 문항이 여러 개일 때는 "몇 개에 답했는지"가
+ * 참가자에게 가장 필요한 정보입니다.
+ */
+function PageBadge({
+  states,
+  answered,
+  total,
 }: {
-  state: 'idle' | 'saving' | 'saved' | 'error'
-  type: Slide['type']
+  states: SaveState[]
+  answered: number
+  total: number
 }) {
-  if (state === 'saving') return <span className="badge">저장 중…</span>
-  if (state === 'saved') return <span className="badge badge--ok">저장됨</span>
-  if (state === 'error') return <span className="badge badge--err">저장 실패</span>
-  // 안내 페이지에는 고를 것이 없으므로 "미응답"이라고 하면 어색합니다.
+  if (states.includes('error')) return <span className="badge badge--err">저장 실패</span>
+  if (states.includes('saving')) return <span className="badge">저장 중…</span>
+  // 안내만 있는 페이지에는 응답 수를 셀 것이 없습니다.
   // (의견은 안내 페이지에도 남길 수 있습니다.)
-  if (type === 'info') return null
-  return <span className="badge badge--muted">미응답</span>
+  if (total === 0) return null
+  if (answered >= total) return <span className="badge badge--ok">모두 응답</span>
+  if (total === 1) return <span className="badge badge--muted">미응답</span>
+  return (
+    <span className="badge badge--muted">
+      {answered} / {total} 응답
+    </span>
+  )
 }
 
 /* ---------------------------------------------------------------- 공통 */

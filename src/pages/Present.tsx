@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useLiveSession } from '../lib/useLiveSession'
 import { formatDuration, useElapsedSeconds } from '../lib/useElapsed'
 import { useWakeLock } from '../lib/useWakeLock'
-import { slideOptions, type Slide } from '../lib/types'
+import { slideOptions, type Page, type Slide } from '../lib/types'
 
 /**
  * 빔프로젝터용 화면. 조작 UI가 없고 진행만 따라갑니다.
@@ -13,6 +13,7 @@ import { slideOptions, type Slide } from '../lib/types'
 export default function PresentPage() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const { session } = useLiveSession(sessionId ?? null)
+  const [pages, setPages] = useState<Page[]>([])
   const [slides, setSlides] = useState<Slide[]>([])
   const [surveyTitle, setSurveyTitle] = useState("")
   const [authorized, setAuthorized] = useState<boolean | null>(null)
@@ -26,11 +27,16 @@ export default function PresentPage() {
     })()
   }, [])
 
-  // 문항은 설문에 붙어 있으므로 세션 → 설문을 거쳐 불러옵니다.
+  // 페이지·문항은 설문에 붙어 있으므로 세션 → 설문을 거쳐 불러옵니다.
   useEffect(() => {
     if (!authorized || !session?.survey_id) return
     void (async () => {
-      const [slideRes, surveyRes] = await Promise.all([
+      const [pageRes, slideRes, surveyRes] = await Promise.all([
+        supabase
+          .from('pages')
+          .select('*')
+          .eq('survey_id', session.survey_id)
+          .order('order_index'),
         supabase
           .from('slides')
           .select('*')
@@ -38,6 +44,7 @@ export default function PresentPage() {
           .order('order_index'),
         supabase.from('surveys').select('title').eq('id', session.survey_id).maybeSingle(),
       ])
+      setPages((pageRes.data as Page[]) ?? [])
       setSlides((slideRes.data as Slide[]) ?? [])
       if (surveyRes.data) setSurveyTitle(surveyRes.data.title as string)
     })()
@@ -76,43 +83,66 @@ export default function PresentPage() {
       </div>
     )
 
-  const current = slides.find((s) => s.order_index === session.current_slide_index)
-  const options = slideOptions(current?.options)
+  const currentPage = pages.find((p) => p.order_index === session.current_page_index)
+  const pageSlides = currentPage
+    ? slides
+        .filter((s) => s.page_id === currentPage.id)
+        .sort((a, b) => a.order_index - b.order_index)
+    : []
+  const multiple = pageSlides.length > 1
 
   return (
     <div className="present">
       <header className="present__bar">
         <span>
-          {session.current_slide_index + 1} / {slides.length}
+          {session.current_page_index + 1} / {pages.length}
         </span>
         <span>{formatDuration(totalElapsed)}</span>
       </header>
 
-      <main className="present__main">
-        <h1 className="present__title">{current?.title ?? ''}</h1>
-        {current?.body && <p className="present__body">{current.body}</p>}
-
-        {current && current.type !== 'info' && options.length > 0 && (
-          <ul
-            className={
-              current.type === 'ox'
-                ? 'present__options present__options--ox'
-                : 'present__options'
-            }
-          >
-            {options.map((option, i) => (
-              <li key={`${option.label}-${i}`}>
-                <span className="present__option-label">{option.label}</span>
-                {option.description && (
-                  <span className="present__option-desc">{option.description}</span>
-                )}
-              </li>
-            ))}
-          </ul>
+      {/* 문항이 여럿이면 화면을 위에서부터 채우고, 넘치면 스크롤합니다. */}
+      <main className={'present__main' + (multiple ? ' present__main--list' : '')}>
+        {currentPage?.title && multiple && (
+          <p className="present__page-title">{currentPage.title}</p>
         )}
 
-        {current?.type === 'text' && (
-          <p className="present__sub">폰에 자유롭게 입력해 주세요</p>
+        {pageSlides.map((slide) => {
+          const options = slideOptions(slide.options)
+          return (
+            <section key={slide.id} className="present__slide">
+              <h1 className="present__title">{slide.title}</h1>
+              {slide.body && <p className="present__body">{slide.body}</p>}
+
+              {slide.type !== 'info' && options.length > 0 && (
+                <ul
+                  className={
+                    slide.type === 'ox'
+                      ? 'present__options present__options--ox'
+                      : 'present__options'
+                  }
+                >
+                  {options.map((option, i) => (
+                    <li key={`${option.label}-${i}`}>
+                      <span className="present__option-label">{option.label}</span>
+                      {option.description && (
+                        <span className="present__option-desc">{option.description}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {slide.type === 'text' && (
+                <p className="present__sub">폰에 자유롭게 입력해 주세요</p>
+              )}
+            </section>
+          )
+        })}
+
+        {multiple && (
+          <p className="present__sub present__scroll-hint">
+            폰 화면을 내리며 모든 문항에 답해 주세요
+          </p>
         )}
       </main>
     </div>

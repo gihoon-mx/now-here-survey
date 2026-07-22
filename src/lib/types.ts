@@ -22,11 +22,22 @@ export interface Session {
   survey_id: string
   name: string
   status: SessionStatus
-  current_slide_index: number
+  current_page_index: number
   started_at: string | null
-  current_slide_started_at: string | null
+  current_page_started_at: string | null
   ended_at: string | null
   created_at: string
+}
+
+/**
+ * 페이지. 진행자가 한 번에 넘기는 단위이고, 문항을 여러 개 담을 수 있습니다.
+ * 참가자는 한 페이지 안의 문항을 스크롤하며 모두 답한 뒤 다음 페이지를 기다립니다.
+ */
+export interface Page {
+  id: string
+  survey_id: string
+  order_index: number
+  title: string | null
 }
 
 /** 선택지 하나. 설명은 선택지 아래 작은 글씨로 표시됩니다. */
@@ -44,6 +55,8 @@ export type RawOption = string | SlideOption
 export interface Slide {
   id: string
   survey_id: string
+  page_id: string
+  /** 페이지 안에서의 순서입니다 (설문 전체 순서가 아니라). */
   order_index: number
   type: SlideType
   title: string
@@ -51,6 +64,16 @@ export interface Slide {
   options: RawOption[]
   multi: boolean
   required: boolean
+}
+
+/** 페이지 순서 → 페이지 안 순서로 문항을 설문 전체 순서로 폅니다. */
+export function orderSlides(pages: Page[], slides: Slide[]): Slide[] {
+  const pageOrder = new Map(pages.map((p) => [p.id, p.order_index]))
+  return [...slides].sort(
+    (a, b) =>
+      (pageOrder.get(a.page_id) ?? 0) - (pageOrder.get(b.page_id) ?? 0) ||
+      a.order_index - b.order_index,
+  )
 }
 
 /** 어떤 형식으로 저장돼 있든 { label, description } 배열로 돌려줍니다. */
