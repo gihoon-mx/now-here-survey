@@ -83,6 +83,18 @@ export default function PresentPage() {
       </div>
     )
 
+  // 진행자가 "페이지 시작"을 누르기 전에는 문항을 미리 보여 주지 않습니다.
+  if (!session.page_revealed)
+    return (
+      <div className="present present--center">
+        <p className="present__sub">
+          {session.current_page_index + 1} / {pages.length}
+        </p>
+        <h1 className="present__title">잠시만 기다려 주세요</h1>
+        <p className="present__sub">곧 다음 페이지가 시작됩니다</p>
+      </div>
+    )
+
   const currentPage = pages.find((p) => p.order_index === session.current_page_index)
   const pageSlides = currentPage
     ? slides

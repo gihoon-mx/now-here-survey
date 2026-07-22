@@ -37,6 +37,9 @@ create table if not exists public.sessions (
   status                  text not null default 'draft'
                             check (status in ('draft', 'live', 'ended')),
   current_page_index      int  not null default 0,
+  -- 페이지는 "대기 → 진행자가 시작"의 두 단계로 열립니다. false 인 동안
+  -- 참가자에게는 이 페이지가 보이지 않습니다 (진행자가 말로 안내할 시간).
+  page_revealed           boolean not null default false,
   started_at              timestamptz,
   current_page_started_at timestamptz,
   ended_at                timestamptz,
@@ -55,17 +58,19 @@ create table if not exists public.pages (
 
 -- 문항. 페이지에 속합니다.
 create table if not exists public.slides (
-  id          uuid primary key default gen_random_uuid(),
-  survey_id   uuid references public.surveys(id) on delete cascade,
-  page_id     uuid references public.pages(id) on delete cascade,
-  order_index int  not null,
-  type        text not null check (type in ('choice', 'ox', 'info', 'text')),
-  title       text not null default '',
-  body        text,
-  options     jsonb not null default '[]'::jsonb,
-  multi       boolean not null default false,
-  required    boolean not null default false,
-  created_at  timestamptz not null default now()
+  id              uuid primary key default gen_random_uuid(),
+  survey_id       uuid references public.surveys(id) on delete cascade,
+  page_id         uuid references public.pages(id) on delete cascade,
+  order_index     int  not null,
+  type            text not null check (type in ('choice', 'ox', 'info', 'text')),
+  title           text not null default '',
+  body            text,
+  options         jsonb not null default '[]'::jsonb,
+  multi           boolean not null default false,
+  required        boolean not null default false,
+  -- 항목별 자유 의견란 표시 여부 (기본 켜짐)
+  comment_enabled boolean not null default true,
+  created_at      timestamptz not null default now()
 );
 
 create table if not exists public.participants (
@@ -203,10 +208,18 @@ begin
   end if;
 end $$;
 
--- 기존 설치에는 page_id 열이 없습니다. create table if not exists 는 이미 있는
+-- 기존 설치에는 새 열이 없습니다. create table if not exists 는 이미 있는
 -- 테이블을 건드리지 않으므로 여기서 직접 추가합니다.
 alter table public.slides
   add column if not exists page_id uuid references public.pages(id) on delete cascade;
+alter table public.slides
+  add column if not exists comment_enabled boolean not null default true;
+-- 기존 행은 true 로 채워야 진행 중인 세션의 현재 페이지가 사라지지 않습니다.
+-- 새 흐름(대기 → 시작)은 start_session / move_page 가 false 로 만들며 시작됩니다.
+alter table public.sessions
+  add column if not exists page_revealed boolean not null default true;
+alter table public.sessions
+  alter column page_revealed set default false;
 
 -- 페이지가 없는 문항에 페이지를 하나씩 만들어 붙입니다. 이미 이행된 문항은
 -- 건드리지 않으므로 재실행해도 안전합니다.
@@ -362,6 +375,7 @@ declare
   v_slide          public.slides%rowtype;
   v_session        public.sessions%rowtype;
   v_page_index     int;
+  v_existing       public.responses%rowtype;
 begin
   select id, session_id into v_participant_id, v_session_id
   from public.participants where auth_user_id = auth.uid();
@@ -378,22 +392,49 @@ begin
     raise exception '잘못된 문항입니다.';
   end if;
 
-  if v_session.status <> 'live' then
+  select order_index into v_page_index from public.pages where id = v_slide.page_id;
+
+  if v_session.status = 'live' then
+    -- 진행 중: 지금 열려 있는 페이지의 문항만. 페이지 안에서의 순서는
+    -- 상관없고, "그 페이지가 시작되었는지"가 기준입니다.
+    if v_page_index is distinct from v_session.current_page_index
+       or not v_session.page_revealed then
+      raise exception '지금 진행 중인 문항이 아닙니다.';
+    end if;
+
+  elsif v_session.status = 'ended' then
+    /*
+     * 종료 후 보충 응답. 진행 중에 놓친 문항을 마저 답할 수 있게 합니다.
+     * 다만 진행 중에 이미 답한 문항은 고칠 수 없습니다 — 종료 후에 앞
+     * 문항들을 바꿀 수 있으면 "진행 당시의 응답"이라는 결과의 의미가
+     * 깨집니다. 보충으로 낸 답(answered_at 이 종료 이후)은 본인이 이어서
+     * 고칠 수 있습니다.
+     */
+    if v_page_index > v_session.current_page_index then
+      raise exception '진행되지 않은 문항입니다.';
+    end if;
+
+    select * into v_existing from public.responses
+    where slide_id = p_slide_id and participant_id = v_participant_id;
+
+    if v_existing.id is not null and v_existing.answer is not null
+       and (v_session.ended_at is null or v_existing.answered_at <= v_session.ended_at) then
+      raise exception '이미 응답한 문항입니다.';
+    end if;
+
+  else
     raise exception '진행 중인 설문이 아닙니다.';
   end if;
 
-  -- 진행 중인 페이지의 문항인지 서버에서 직접 확인합니다.
-  -- 페이지 안에서의 순서는 상관없고, 페이지가 지나갔는지가 기준입니다.
-  select order_index into v_page_index from public.pages where id = v_slide.page_id;
-  if v_page_index is distinct from v_session.current_page_index then
-    raise exception '이미 지나간 문항입니다.';
-  end if;
-
-  -- comment 는 건드리지 않습니다.
+  -- comment 는 건드리지 않습니다. answered_at 은 "실제 답이 처음 들어온
+  -- 시각"입니다 — 의견만 있던 행에 나중에 답이 들어오면 그때를 찍습니다.
   insert into public.responses (session_id, slide_id, participant_id, answer)
   values (v_session_id, p_slide_id, v_participant_id, p_answer)
   on conflict (slide_id, participant_id)
-  do update set answer = excluded.answer, updated_at = now();
+  do update set answer = excluded.answer,
+                updated_at = now(),
+                answered_at = case when responses.answer is null then now()
+                                   else responses.answered_at end;
 end;
 $$;
 
@@ -430,8 +471,9 @@ begin
   end if;
 
   select order_index into v_page_index from public.pages where id = v_slide.page_id;
-  if v_page_index is distinct from v_session.current_page_index then
-    raise exception '이미 지나간 문항입니다.';
+  if v_page_index is distinct from v_session.current_page_index
+     or not v_session.page_revealed then
+    raise exception '지금 진행 중인 문항이 아닙니다.';
   end if;
 
   insert into public.responses (session_id, slide_id, participant_id, comment)
@@ -452,14 +494,18 @@ as $$
 begin
   if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
 
+  -- 첫 페이지도 바로 열지 않습니다. 진행자가 "페이지 시작"을 눌러야
+  -- 참가자 화면에 나타납니다 (reveal_page).
   update public.sessions
-     set status = 'live', current_page_index = 0,
-         started_at = now(), current_page_started_at = now(), ended_at = null
+     set status = 'live', current_page_index = 0, page_revealed = false,
+         started_at = now(), current_page_started_at = null, ended_at = null
    where id = p_session_id;
 end;
 $$;
 
 -- 페이지 단위로 넘기고 돌아갑니다 (p_delta = ±1).
+-- 이동한 페이지는 대기 상태로 시작합니다 — 진행자가 reveal_page 를 눌러야
+-- 참가자에게 보입니다.
 create or replace function public.move_page(p_session_id uuid, p_delta int)
 returns int
 language plpgsql security definer set search_path = public
@@ -480,11 +526,27 @@ begin
 
   v_next := greatest(0, least(v_current + p_delta, v_max));
 
+  -- 페이지 경과 시각은 실제로 열린 순간(reveal_page)부터 셉니다.
   update public.sessions
-     set current_page_index = v_next, current_page_started_at = now()
+     set current_page_index = v_next, page_revealed = false,
+         current_page_started_at = null
    where id = p_session_id;
 
   return v_next;
+end;
+$$;
+
+-- 대기 중인 현재 페이지를 참가자에게 엽니다.
+create or replace function public.reveal_page(p_session_id uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
+
+  update public.sessions
+     set page_revealed = true, current_page_started_at = now()
+   where id = p_session_id and status = 'live';
 end;
 $$;
 
@@ -510,7 +572,7 @@ begin
   delete from public.responses where session_id = p_session_id;
 
   update public.sessions
-     set status = 'draft', current_page_index = 0,
+     set status = 'draft', current_page_index = 0, page_revealed = false,
          started_at = null, current_page_started_at = null, ended_at = null
    where id = p_session_id;
 end;
@@ -551,8 +613,8 @@ begin
     values (v_new_id, r.order_index, r.title)
     returning id into v_new_page;
 
-    insert into public.slides (survey_id, page_id, order_index, type, title, body, options, multi, required)
-    select v_new_id, v_new_page, order_index, type, title, body, options, multi, required
+    insert into public.slides (survey_id, page_id, order_index, type, title, body, options, multi, required, comment_enabled)
+    select v_new_id, v_new_page, order_index, type, title, body, options, multi, required, comment_enabled
     from public.slides where page_id = r.id;
   end loop;
 
@@ -647,7 +709,9 @@ drop policy if exists pages_admin_all on public.pages;
 create policy pages_admin_all on public.pages
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
--- 자기 회차가 속한 설문의 페이지 중, 지금까지 진행된 순번까지만.
+-- 자기 회차가 속한 설문의 페이지 중, 지금까지 "열린" 순번까지만.
+-- 현재 페이지라도 진행자가 시작을 누르기 전(대기)에는 보이지 않습니다.
+-- 종료 후에는 진행된 페이지 전부를 읽을 수 있습니다 (미응답 보충용).
 drop policy if exists pages_participant_read on public.pages;
 create policy pages_participant_read on public.pages
   for select to authenticated
@@ -658,8 +722,13 @@ create policy pages_participant_read on public.pages
       join public.sessions s on s.id = p.session_id
       where p.auth_user_id = auth.uid()
         and s.survey_id = pages.survey_id
-        and s.status = 'live'
-        and pages.order_index <= s.current_page_index
+        and (
+          (s.status = 'live'
+            and (pages.order_index < s.current_page_index
+                 or (pages.order_index = s.current_page_index and s.page_revealed)))
+          or
+          (s.status = 'ended' and pages.order_index <= s.current_page_index)
+        )
     )
   );
 
@@ -668,7 +737,7 @@ create policy slides_admin_all on public.slides
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- 문항은 자기 페이지가 공개된 만큼만 보입니다. 개발자 도구를 열어도
--- 아직 나오지 않은 페이지의 문항은 읽히지 않습니다.
+-- 아직 열리지 않은 페이지의 문항은 읽히지 않습니다.
 drop policy if exists slides_participant_read on public.slides;
 create policy slides_participant_read on public.slides
   for select to authenticated
@@ -680,8 +749,13 @@ create policy slides_participant_read on public.slides
       join public.pages pg on pg.id = slides.page_id
       where p.auth_user_id = auth.uid()
         and s.survey_id = slides.survey_id
-        and s.status = 'live'
-        and pg.order_index <= s.current_page_index
+        and (
+          (s.status = 'live'
+            and (pg.order_index < s.current_page_index
+                 or (pg.order_index = s.current_page_index and s.page_revealed)))
+          or
+          (s.status = 'ended' and pg.order_index <= s.current_page_index)
+        )
     )
   );
 
@@ -733,6 +807,7 @@ grant execute on function public.submit_response(uuid, jsonb)   to authenticated
 grant execute on function public.submit_comment(uuid, text)     to authenticated;
 grant execute on function public.start_session(uuid)            to authenticated;
 grant execute on function public.move_page(uuid, int)           to authenticated;
+grant execute on function public.reveal_page(uuid)              to authenticated;
 grant execute on function public.end_session(uuid)              to authenticated;
 grant execute on function public.reset_session(uuid)            to authenticated;
 grant execute on function public.duplicate_survey(uuid, text)   to authenticated;

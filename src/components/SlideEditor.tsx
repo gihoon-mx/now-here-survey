@@ -282,6 +282,7 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
             body: row.body || null,
             options: row.options,
             multi: row.multi,
+            comment_enabled: row.comment_enabled,
           })),
         ),
       )
@@ -451,7 +452,13 @@ export default function SlideEditor({ surveyId }: { surveyId: string }) {
               ) : (
                 <ol className="editor__list">
                   {inPage.map((slide, i) => (
-                    <li key={slide.id} className="slide-card slide-card--nested">
+                    <li
+                      key={slide.id}
+                      className={
+                        'slide-card slide-card--nested' +
+                        (openId === slide.id ? ' slide-card--selected' : '')
+                      }
+                    >
                       <div className="slide-card__head">
                         <span className="slide-card__index">{i + 1}</span>
                         <button
@@ -555,8 +562,47 @@ function SlideForm({
 
   const hasOptions = slide.type === 'choice' || slide.type === 'ox'
 
+  /**
+   * 이미 만든 문항의 유형을 바꿉니다. 제목·설명·의견란 설정은 그대로 두고,
+   * 선택지만 새 유형에 맞게 조정합니다 — OX 는 두 개(기존 선택지의 앞
+   * 두 개를 유지), 다지선다는 비어 있으면 기본 네 칸을 채웁니다.
+   */
+  const changeType = (type: SlideType) => {
+    if (type === slide.type) return
+    const changes: Partial<Slide> = { type }
+
+    if (type === 'ox') {
+      changes.options =
+        options.length >= 2 ? options.slice(0, 2) : [{ label: 'O' }, { label: 'X' }]
+      changes.multi = false
+    } else if (type === 'choice') {
+      if (options.length === 0) {
+        changes.options = [{ label: '' }, { label: '' }, { label: '' }, { label: '' }]
+      }
+    } else {
+      // 안내·주관식에는 선택지가 없습니다. 다시 선택형으로 돌리면 위에서 채웁니다.
+      changes.options = []
+      changes.multi = false
+    }
+    onPatch(changes)
+  }
+
   return (
     <div className="slide-card__body">
+      <label className="field">
+        <span>유형</span>
+        <select
+          value={slide.type}
+          onChange={(e) => changeType(e.target.value as SlideType)}
+        >
+          {(Object.keys(SLIDE_TYPE_LABEL) as SlideType[]).map((type) => (
+            <option key={type} value={type}>
+              {SLIDE_TYPE_LABEL[type]}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <label className="field">
         <span>{slide.type === 'info' ? '안내 제목' : '질문'}</span>
         <input
@@ -646,6 +692,15 @@ function SlideForm({
       {slide.type === 'text' && (
         <p className="muted">참가자에게 자유 입력란(최대 1000자)이 표시됩니다.</p>
       )}
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={slide.comment_enabled ?? true}
+          onChange={(e) => onPatch({ comment_enabled: e.target.checked })}
+        />
+        <span>추가 의견란 표시 (참가자가 이 항목에 자유 의견을 남길 수 있습니다)</span>
+      </label>
 
       {/* 참가자 화면과 같은 컴포넌트로 그리므로 실제 모습과 어긋나지 않습니다. */}
       <div className="preview">

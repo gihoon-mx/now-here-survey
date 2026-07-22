@@ -162,7 +162,9 @@ export default function LiveControl({
             {participantCount}명
           </p>
           <p className="muted">
-            시작하면 참가자 폰이 첫 페이지로 동시에 넘어갑니다.
+            시작하면 참가자 폰은 대기 화면이 되고, 이어서{' '}
+            <strong>페이지 시작</strong>을 누르는 순간 첫 페이지가 전원에게
+            나타납니다.
           </p>
           {participantCount === 0 && (
             <p className="warn">
@@ -210,6 +212,7 @@ export default function LiveControl({
 
   /* --------------------------------------------------------- 진행 중 */
   const isLast = session.current_page_index >= pages.length - 1
+  const revealed = session.page_revealed
   const nextSlides = pageSlides(next)
 
   /** 페이지를 요약해 보여 줍니다 — 제목이 있으면 제목, 없으면 첫 문항. */
@@ -225,7 +228,9 @@ export default function LiveControl({
         </div>
         <div className="timer">
           <span className="timer__label">이 페이지</span>
-          <span className="timer__value">{formatDuration(pageElapsed)}</span>
+          <span className="timer__value">
+            {revealed ? formatDuration(pageElapsed) : '대기 중'}
+          </span>
         </div>
       </div>
 
@@ -235,15 +240,24 @@ export default function LiveControl({
           {currentSlides.length > 1 && ` · 문항 ${currentSlides.length}개`}
           {currentSlides.length === 1 &&
             ` · ${SLIDE_TYPE_LABEL[currentSlides[0].type]}`}
+          {!revealed && ' · 대기 중'}
         </span>
         <h2 className="current__title">{pageLabel(current, currentSlides)}</h2>
         {currentSlides.length === 1 && currentSlides[0].body && (
           <p className="current__body">{currentSlides[0].body}</p>
         )}
 
+        {/* 대기 중에는 참가자에게 아무것도 보이지 않습니다. 시작을 눌러야 열립니다. */}
+        {!revealed && (
+          <p className="warn">
+            참가자에게는 아직 보이지 않습니다. 아래 <strong>페이지 시작</strong>을
+            누르면 전원의 화면에 나타납니다.
+          </p>
+        )}
+
         {/* 문항이 여럿이면 문항별 응답 수를 나란히 보여 줍니다.
             이 숫자를 보고 넘길 타이밍을 잡습니다. */}
-        {currentSlides.length > 1 && (
+        {revealed && currentSlides.length > 1 && (
           <ul className="current__slides">
             {currentSlides.map((slide) => (
               <li key={slide.id} className="current__slide">
@@ -274,7 +288,7 @@ export default function LiveControl({
       </div>
 
       {/* 문항이 하나면 예전처럼 큰 카운터 하나만 보여 줍니다. */}
-      {currentQuestions.length === 1 && (
+      {revealed && currentQuestions.length === 1 && (
         <div className="counter">
           <span className="counter__value">
             {answered[currentQuestions[0].id] ?? 0}{' '}
@@ -310,7 +324,15 @@ export default function LiveControl({
           </button>
         )}
 
-        {isLast ? (
+        {!revealed ? (
+          <button
+            className="btn btn--primary btn--block btn--lg"
+            disabled={busy}
+            onClick={() => call('reveal_page', { p_session_id: sessionId })}
+          >
+            페이지 시작 — 참가자에게 보이기
+          </button>
+        ) : isLast ? (
           <button
             className="btn btn--danger btn--block btn--lg"
             disabled={busy}

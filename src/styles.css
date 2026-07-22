@@ -503,14 +503,14 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
-/* 항목별 자유 의견 */
+/* 항목별 자유 의견 — 평소에는 한 줄로 접혀 있어 문항을 가리지 않습니다. */
 
 .comment {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-top: 4px;
-  padding-top: 16px;
+  padding-top: 10px;
   border-top: 1px dashed var(--border-strong);
 }
 
@@ -526,6 +526,58 @@ textarea {
 
 .comment__input {
   background: var(--surface-soft);
+  font-size: 0.95rem;
+  padding: 10px;
+}
+
+/* 접힌 상태의 "＋ 의견 남기기" 한 줄 버튼 */
+.comment__add {
+  appearance: none;
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: left;
+  cursor: pointer;
+  min-height: 38px;
+}
+
+.comment__actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 저장된 의견 표시 — 입력한 내용이 반영되었음을 눈으로 확인할 수 있습니다. */
+.comment__view {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  position: relative;
+}
+
+.comment__text {
+  margin: 0;
+  font-size: 0.92rem;
+  white-space: pre-line;
+}
+
+.comment__edit {
+  align-self: flex-start;
+  padding: 4px 8px;
+  min-height: 30px;
+}
+
+.comment__saved-badge {
+  color: var(--ok);
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 /* --------------------------------------- 관리자 레이아웃 (메뉴 + 내용) */
@@ -1095,6 +1147,14 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 펼쳐서 편집 중인 문항. 목록에서 지금 어디를 고치고 있는지 바로 보이게
+   테두리와 배경을 함께 강조합니다. */
+.slide-card--selected {
+  border: 2px solid var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
 .slide-card {

@@ -185,15 +185,27 @@ const expectEvent = async (label, action, predicate, timeoutMs = 10000) => {
 }
 
 await expectEvent(
-  '세션 시작이 참가자에게 전달됨',
+  '세션 시작이 참가자에게 전달됨 (첫 페이지는 대기 상태)',
   () => admin.rpc('start_session', { p_session_id: session.id }),
-  (row) => row.status === 'live' && row.current_page_index === 0,
+  (row) => row.status === 'live' && row.current_page_index === 0 && row.page_revealed === false,
 )
 
 await expectEvent(
-  '다음 페이지 이동이 전달됨',
+  '페이지 시작(공개)이 전달됨',
+  () => admin.rpc('reveal_page', { p_session_id: session.id }),
+  (row) => row.current_page_index === 0 && row.page_revealed === true,
+)
+
+await expectEvent(
+  '다음 페이지 이동이 전달됨 (대기 상태로)',
   () => admin.rpc('move_page', { p_session_id: session.id, p_delta: 1 }),
-  (row) => row.current_page_index === 1,
+  (row) => row.current_page_index === 1 && row.page_revealed === false,
+)
+
+await expectEvent(
+  '다음 페이지 시작도 전달됨',
+  () => admin.rpc('reveal_page', { p_session_id: session.id }),
+  (row) => row.current_page_index === 1 && row.page_revealed === true,
 )
 
 await expectEvent(
@@ -208,9 +220,11 @@ await expectEvent(
   (row) => row.status === 'ended',
 )
 
-// 페이지마다 서버가 시각을 다시 찍는지 (경과 시간 표시의 근거)
+// 페이지가 열릴 때마다 서버가 시각을 다시 찍는지 (경과 시간 표시의 근거).
+// 대기 중에는 null 이므로, 두 번의 공개 시각 + null 로 3가지가 나와야 합니다.
 const stamps = new Set(events.map((e) => e.row.current_page_started_at))
-check('페이지마다 서버 시각이 갱신됨', stamps.size >= 3, `서로 다른 시각 ${stamps.size}개`)
+check('페이지가 열릴 때마다 서버 시각이 갱신됨', stamps.size >= 3,
+  `서로 다른 시각 ${stamps.size}개`)
 
 /* ------------------------------------------------------------- 정리 */
 console.log('\n[4] 정리')

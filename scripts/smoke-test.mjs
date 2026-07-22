@@ -139,6 +139,8 @@ const mkSlides = await rest('/slides', {
   ],
 })
 check('슬라이드 4개 생성', mkSlides.ok, mkSlides.ok ? '' : JSON.stringify(mkSlides.data))
+check('의견란 기본값은 켜짐',
+  (mkSlides.data ?? []).every((s) => s.comment_enabled === true))
 const bySlideTitle = (title) => (mkSlides.data ?? []).find((s) => s.title === title)
 const sInfo   = bySlideTitle('안내')
 const sChoice = bySlideTitle('만족도는?')
@@ -207,14 +209,34 @@ check('관리자가 세션 시작', start.ok, start.ok ? '' : JSON.stringify(sta
 const notAdmin = await rpc('start_session', { p_survey_id: SURVEY }, P1)
 check('참가자는 세션을 제어할 수 없음', !notAdmin.ok, `status ${notAdmin.status}`)
 
+// 페이지는 "대기 → 진행자가 시작"의 두 단계로 열립니다.
+const waiting = await rest('/slides?select=title', { token: P1 })
+check('시작 직후(대기 중)에는 아직 아무 문항도 안 보임',
+  waiting.ok && waiting.data.length === 0,
+  JSON.stringify(waiting.data.map((s) => s.title)))
+
+const notAdminReveal = await rpc('reveal_page', { p_session_id: SESSION }, P1)
+check('참가자는 페이지를 열 수 없음', !notAdminReveal.ok, `status ${notAdminReveal.status}`)
+
+await rpc('reveal_page', { p_session_id: SESSION }, ADMIN)
 const seen0 = await rest('/slides?select=title', { token: P1 })
-check('첫 페이지의 문항만 보임 (1개)',
+check('페이지 시작을 누르면 첫 페이지의 문항이 보임 (1개)',
   seen0.ok && seen0.data.length === 1,
   JSON.stringify(seen0.data.map((s) => s.title)))
 
 await rpc('move_page', { p_session_id: SESSION, p_delta: 1 }, ADMIN)
+const seenWaiting = await rest('/slides?select=title', { token: P1 })
+check('다음 페이지로 넘겨도 시작 전에는 이전 문항만 보임 (1개)',
+  seenWaiting.data.length === 1,
+  JSON.stringify(seenWaiting.data.map((s) => s.title)))
+
+const earlyAns = await rpc('submit_response',
+  { p_slide_id: sChoice.id, p_answer: { choice: '보통' } }, P1)
+check('대기 중인 페이지의 문항에는 응답 불가', !earlyAns.ok, `status ${earlyAns.status}`)
+
+await rpc('reveal_page', { p_session_id: SESSION }, ADMIN)
 const seen1 = await rest('/slides?select=title', { token: P1 })
-check('다음 페이지로 넘기면 그 페이지의 문항 2개가 함께 보임 (총 3개)',
+check('페이지를 열면 그 페이지의 문항 2개가 함께 보임 (총 3개)',
   seen1.data.length === 3,
   JSON.stringify(seen1.data.map((s) => s.title)))
 
@@ -277,6 +299,7 @@ check('공백만 남기면 의견은 비워짐',
   JSON.stringify(afterBlank.data))
 
 await rpc('move_page', { p_session_id: SESSION, p_delta: 1 }, ADMIN)
+await rpc('reveal_page', { p_session_id: SESSION }, ADMIN)
 const past = await rpc('submit_response',
   { p_slide_id: sChoice.id, p_answer: { choice: '아니다' } }, P1)
 check('지나간 페이지의 문항은 수정 불가', !past.ok, `status ${past.status}`)
@@ -306,13 +329,39 @@ check('관리자는 전체 응답을 볼 수 있음', adminSees.ok && adminSees.
   `${adminSees.data?.length}건`)
 
 /* --------------------------------------------------------- 8. 종료 */
-console.log('\n[8] 종료 및 정리')
+console.log('\n[8] 종료 및 미응답 보충')
 const end = await rpc('end_session', { p_session_id: SESSION }, ADMIN)
 check('세션 종료', end.ok, end.ok ? '' : JSON.stringify(end.data))
 
+// P2 는 진행 중에 sText 에 이미 답했습니다 — 종료 후 수정은 막힙니다.
 const afterEnd = await rpc('submit_response',
   { p_slide_id: sText.id, p_answer: { text: '늦은 답' } }, P2)
-check('종료 후에는 응답 불가', !afterEnd.ok, `status ${afterEnd.status}`)
+check('종료 후에도 이미 답한 문항은 수정 불가', !afterEnd.ok, `status ${afterEnd.status}`)
+
+// P1 은 sText 를 놓쳤습니다 — 종료 후 보충 응답이 가능해야 합니다.
+const endedSlides = await rest('/slides?select=title', { token: P1 })
+check('종료 후에도 진행된 문항을 읽을 수 있음 (보충용)',
+  endedSlides.ok && endedSlides.data.length === 4,
+  `${endedSlides.data?.length}개`)
+
+const makeup = await rpc('submit_response',
+  { p_slide_id: sText.id, p_answer: { text: '놓친 답변입니다' } }, P1)
+check('놓친 문항은 종료 후에 답할 수 있음', makeup.ok,
+  makeup.ok ? '' : JSON.stringify(makeup.data))
+
+const makeupEdit = await rpc('submit_response',
+  { p_slide_id: sText.id, p_answer: { text: '놓친 답변 (수정)' } }, P1)
+check('보충으로 낸 답은 이어서 고칠 수 있음', makeupEdit.ok,
+  makeupEdit.ok ? '' : JSON.stringify(makeupEdit.data))
+
+const makeupOld = await rpc('submit_response',
+  { p_slide_id: sChoice.id, p_answer: { choice: '아니다' } }, P1)
+check('진행 중에 답한 문항은 보충으로도 수정 불가', !makeupOld.ok,
+  `status ${makeupOld.status}`)
+
+const makeupCmt = await rpc('submit_comment',
+  { p_slide_id: sText.id, p_comment: '종료 후 의견' }, P1)
+check('종료 후에는 의견을 남길 수 없음', !makeupCmt.ok, `status ${makeupCmt.status}`)
 
 /* ------------------------------------------------- 9. 복사 / 다시 시작 */
 console.log('\n[9] 복사 / 다시 시작하기')
@@ -353,6 +402,11 @@ const stillLinked = await rest('/participants?select=login_id', { token: P1 })
 check('참가자 접속이 유지됨', stillLinked.data?.length === 1,
   JSON.stringify(stillLinked.data))
 
+// 의견란을 끈 설정도 사본에 따라가는지 보기 위해 하나 꺼 둡니다.
+await rest(`/slides?id=eq.${sInfo.id}`, {
+  method: 'PATCH', token: ADMIN, body: { comment_enabled: false },
+})
+
 const dup = await rpc('duplicate_survey',
   { p_survey_id: SURVEY, p_title: '[자동테스트] 사본' }, ADMIN)
 check('설문 복사', dup.ok && typeof dup.data === 'string',
@@ -367,7 +421,7 @@ check('페이지가 순서·제목까지 복제됨',
   `${copiedPages.data?.length}개`)
 
 const copiedSlides = await rest(
-  `/slides?select=title,options,page_id&survey_id=eq.${COPY}`,
+  `/slides?select=title,options,page_id,comment_enabled&survey_id=eq.${COPY}`,
   { token: ADMIN })
 check('문항이 페이지 구성까지 복제됨',
   copiedSlides.data?.length === 4 &&
@@ -375,6 +429,8 @@ check('문항이 페이지 구성까지 복제됨',
   `${copiedSlides.data?.length}개`)
 check('선택지도 복제됨',
   copiedSlides.data?.find((s) => s.title === '만족도는?')?.options.length === 3)
+check('의견란 끔 설정도 복제됨',
+  copiedSlides.data?.find((s) => s.title === '안내')?.comment_enabled === false)
 
 // 회차는 복제하지 않습니다 — 사본은 새 진행을 위한 것이라 참가자도 회차도
 // 새로 만드는 것이 맞습니다.

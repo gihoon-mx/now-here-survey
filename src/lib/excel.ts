@@ -173,6 +173,7 @@ export interface SlideImportRow {
   body: string
   options: SlideOption[]
   multi: boolean
+  comment_enabled: boolean
 }
 
 /** 가져온 파일의 페이지 하나. 문항 여러 개를 담습니다. */
@@ -202,6 +203,8 @@ const SLIDE_HEADER_ALIASES: Record<string, string> = {
   보기: 'options',
   복수선택: 'multi',
   multi: 'multi',
+  의견란: 'comment',
+  comment: 'comment',
 }
 
 export async function parseSlideFile(file: File): Promise<PageImport[]> {
@@ -273,6 +276,8 @@ export async function parseSlideFile(file: File): Promise<PageImport[]> {
         ? [{ label: 'O' }, { label: 'X' }]
         : options,
       multi: /^(o|y|yes|true|1|예|О)$/i.test(cell.multi ?? ''),
+      // 의견란은 기본 켜짐. X 라고 적은 문항만 끕니다.
+      comment_enabled: !/^(x|n|no|false|0|아니오|끄기)$/i.test(cell.comment ?? ''),
     }
 
     const key = hasPageColumn
@@ -309,6 +314,8 @@ export function buildSlideWorkbook(pages: Page[], slides: Slide[]): XLSX.WorkBoo
         설명: slide.body ?? '',
         선택지: optionsToCell(slideOptions(slide.options)),
         복수선택: slide.multi ? 'O' : '',
+        // 기본(켜짐)은 빈 칸으로 둡니다 — 끈 문항만 X 가 보이게.
+        의견란: (slide.comment_enabled ?? true) ? '' : 'X',
       })),
   )
 

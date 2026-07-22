@@ -119,14 +119,15 @@ check('주관식 — 입력란 표시', text.includes('text-answer'))
 check('주관식 — 기존 응답이 채워짐', text.includes('좋았습니다'))
 
 console.log('\n[항목별 자유 의견]')
-// 모든 유형에 의견란이 붙어야 합니다 — 안내 페이지 포함.
+// 모든 유형에 의견 남기기 버튼이 붙어야 합니다 — 안내 페이지 포함.
+// (평소에는 접혀 있고, 누르면 입력란과 [입력] 버튼이 열립니다.)
 for (const [label, markup] of [
   ['다지선다', choice],
   ['OX', ox],
   ['안내 페이지', info],
   ['주관식', text],
 ]) {
-  check(`${label} — 의견란 표시`, markup.includes('comment__input'))
+  check(`${label} — 의견 남기기 버튼 표시`, markup.includes('comment__add'))
 }
 
 const withComment = render(
@@ -134,7 +135,30 @@ const withComment = render(
   null,
   '이미 적어 둔 의견',
 )
-check('기존 의견이 채워짐', withComment.includes('이미 적어 둔 의견'))
+check('저장된 의견이 화면에 그대로 표시됨',
+  withComment.includes('이미 적어 둔 의견') && withComment.includes('comment__text'))
+
+// 의견란을 끈 문항에는 버튼조차 나오지 않아야 합니다.
+const commentOff = render({
+  type: 'choice', title: '의견란 끔', body: null,
+  options: [{ label: 'A' }], multi: false, comment_enabled: false,
+})
+check('의견란을 끈 문항에는 의견 영역이 없음',
+  !commentOff.includes('comment__add') && !commentOff.includes('comment__input'))
+
+// 종료 후 보충 응답 화면은 showComment=false 로 의견 영역을 통째로 뺍니다.
+const noComment = renderToStaticMarkup(
+  createElement(SlideView, {
+    slide: { type: 'choice', title: '보충', body: null, options: [{ label: 'A' }], multi: false },
+    answer: null,
+    comment: '이 의견은 보이면 안 됩니다',
+    onChange: () => {},
+    onCommentChange: () => {},
+    showComment: false,
+  }),
+)
+check('showComment=false 면 의견 영역이 통째로 빠짐',
+  !noComment.includes('comment__') && !noComment.includes('이 의견은 보이면 안 됩니다'))
 
 console.log('\n[편집 중간 상태]')
 // 편집기에서는 선택지가 아직 비어 있는 순간이 자연스럽게 생깁니다.
@@ -207,7 +231,7 @@ const exported = excel.buildSlideWorkbook(exportPages, [
     options: [{ label: 'A', description: '가' }, { label: 'B' }],
     multi: true,
   },
-  { page_id: 'p2', order_index: 0, type: 'text', title: '자유 의견', body: null, options: [], multi: false },
+  { page_id: 'p2', order_index: 0, type: 'text', title: '자유 의견', body: null, options: [], multi: false, comment_enabled: false },
 ])
 const reimported = await excel.parseSlideFile(asFile(exported, 'e.xlsx'))
 check('내보낸 문항을 다시 가져옴 (페이지 구성 유지)',
@@ -221,6 +245,9 @@ check('제목·설명 보존',
 check('선택지 설명 보존', reimported[0].slides[1].options[0].description === '가')
 check('복수 선택 여부 보존',
   reimported[0].slides[1].multi === true && reimported[0].slides[0].multi === false)
+check('의견란 끔 설정 왕복 보존',
+  reimported[1].slides[0].comment_enabled === false &&
+  reimported[0].slides[0].comment_enabled === true)
 
 // 예전 형식 (페이지 열 없음) — 문항마다 페이지가 하나씩 생겨 예전과 같은 진행이 됩니다.
 const legacyFile = XLSX.utils.book_new()

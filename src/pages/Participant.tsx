@@ -151,6 +151,8 @@ function LiveView({ participant }: { participant: Participant }) {
 
   const index = session?.current_page_index ?? null
   const live = session?.status === 'live'
+  // 진행자가 "페이지 시작"을 누르기 전에는 현재 페이지가 열리지 않습니다.
+  const revealed = session?.page_revealed ?? false
 
   // 대기 화면에 보여 줄 설문 제목. RLS 로 자기 회차의 설문만 읽힙니다.
   useEffect(() => {
@@ -165,9 +167,9 @@ function LiveView({ participant }: { participant: Participant }) {
     })()
   }, [session?.survey_id])
 
-  // 페이지가 바뀔 때마다 그 페이지의 문항과 "내가 이미 낸 응답"을 불러옵니다.
+  // 페이지가 열릴 때마다 그 페이지의 문항과 "내가 이미 낸 응답"을 불러옵니다.
   useEffect(() => {
-    if (!live || index == null) {
+    if (!live || index == null || !revealed) {
       setPage(null)
       setSlides([])
       return
@@ -228,7 +230,7 @@ function LiveView({ participant }: { participant: Participant }) {
     return () => {
       cancelled = true
     }
-  }, [live, index, participant.session_id, participant.id])
+  }, [live, index, revealed, participant.session_id, participant.id])
 
   const setSaveState = (slideId: string, state: SaveState) =>
     setSaveStates((prev) => ({ ...prev, [slideId]: state }))
@@ -286,15 +288,15 @@ function LiveView({ participant }: { participant: Participant }) {
     )
 
   if (session.status === 'ended')
-    return (
-      <Centered>
-        <h1 className="waiting__title">설문이 종료되었습니다</h1>
-        <p className="waiting__body">참여해 주셔서 감사합니다.</p>
-      </Centered>
-    )
+    return <EndedView participant={participant} />
 
   if (!page || slides.length === 0)
-    return <Centered>다음 페이지를 기다리는 중…</Centered>
+    return (
+      <Centered>
+        <h1 className="waiting__title">잠시만 기다려 주세요</h1>
+        <p className="waiting__body">진행자가 곧 다음 페이지를 시작합니다.</p>
+      </Centered>
+    )
 
   // 고를 것이 있는 문항 기준으로 페이지 전체의 진행을 요약합니다.
   const questions = slides.filter((s) => s.type !== 'info')
@@ -341,6 +343,143 @@ function LiveView({ participant }: { participant: Participant }) {
               ? '화면을 내리며 모든 문항에 답해 주세요. 진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'
               : '진행 중에는 답변을 몇 번이든 바꿀 수 있습니다.'}
           </p>
+        )}
+      </main>
+    </div>
+  )
+}
+
+/* ------------------------------------------- 종료 후 미응답 보충 응답 */
+
+/**
+ * 설문이 끝난 뒤, 진행 중에 놓친 문항을 마저 답할 수 있게 합니다.
+ *
+ * 진행된 문항 중 답이 없는 것만 모아 보여 줍니다. 이미 답한 문항은 서버가
+ * 수정을 거부하므로 아예 보여 주지 않고, 의견란도 뺍니다 — 여기는 "빠진
+ * 답을 채우는" 화면이지 설문을 다시 여는 화면이 아니기 때문입니다.
+ */
+function EndedView({ participant }: { participant: Participant }) {
+  const [phase, setPhase] = useState<'loading' | 'summary' | 'makeup'>('loading')
+  const [missed, setMissed] = useState<Slide[]>([])
+  const [answers, setAnswers] = useState<Record<string, Answer | null>>({})
+  const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      // RLS 가 진행된 페이지까지만 보여 줍니다. 그중 답이 없는 문항을 찾습니다.
+      const [pageRes, slideRes, respRes] = await Promise.all([
+        supabase.from('pages').select('*').order('order_index'),
+        supabase.from('slides').select('*'),
+        supabase
+          .from('responses')
+          .select('slide_id, answer')
+          .eq('participant_id', participant.id),
+      ])
+
+      const pages = (pageRes.data as Page[]) ?? []
+      const slides = (slideRes.data as Slide[]) ?? []
+      const answered = new Set(
+        ((respRes.data as { slide_id: string; answer: Answer | null }[]) ?? [])
+          .filter((r) => r.answer != null)
+          .map((r) => r.slide_id),
+      )
+
+      const pageOrder = new Map(pages.map((p) => [p.id, p.order_index]))
+      const unanswered = slides
+        .filter((s) => s.type !== 'info' && !answered.has(s.id))
+        .sort(
+          (a, b) =>
+            (pageOrder.get(a.page_id) ?? 0) - (pageOrder.get(b.page_id) ?? 0) ||
+            a.order_index - b.order_index,
+        )
+
+      setMissed(unanswered)
+      setPhase('summary')
+    })()
+  }, [participant.id])
+
+  const save = useCallback((slideId: string, next: Answer) => {
+    setAnswers((prev) => ({ ...prev, [slideId]: next }))
+    setSaveStates((prev) => ({ ...prev, [slideId]: 'saving' }))
+    setSaveError(null)
+    void supabase
+      .rpc('submit_response', { p_slide_id: slideId, p_answer: next })
+      .then(({ error }) => {
+        setSaveStates((prev) => ({ ...prev, [slideId]: error ? 'error' : 'saved' }))
+        if (error) setSaveError(error.message)
+      })
+  }, [])
+
+  if (phase === 'loading') return <Centered>확인 중…</Centered>
+
+  const remaining = missed.filter((s) => answers[s.id] == null).length
+
+  if (phase === 'summary')
+    return (
+      <Centered>
+        <h1 className="waiting__title">설문이 종료되었습니다</h1>
+        <p className="waiting__body">참여해 주셔서 감사합니다.</p>
+        {missed.length > 0 && (
+          <>
+            <p className="waiting__body">
+              아직 답하지 않은 문항이 <strong>{missed.length}개</strong> 있습니다.
+            </p>
+            <button className="btn btn--primary btn--lg" onClick={() => setPhase('makeup')}>
+              미응답 문항 답변하기
+            </button>
+          </>
+        )}
+      </Centered>
+    )
+
+  return (
+    <div className="screen">
+      <header className="topbar">
+        <span className="topbar__name">{participant.display_name}</span>
+        {remaining === 0 ? (
+          <span className="badge badge--ok">모두 응답</span>
+        ) : (
+          <span className="badge badge--muted">{remaining}개 남음</span>
+        )}
+      </header>
+
+      <main className="pageview">
+        <h1 className="pageview__title">미응답 문항</h1>
+        <p className="muted">
+          진행 중에 놓친 문항입니다. 답을 고르면 바로 저장됩니다.
+        </p>
+
+        {missed.map((slide, i) => (
+          <section key={slide.id} className="pageview__item">
+            <span className="pageview__num">
+              {i + 1} / {missed.length}
+              {saveStates[slide.id] === 'saved' && (
+                <span className="badge badge--ok"> 저장됨</span>
+              )}
+              {saveStates[slide.id] === 'error' && (
+                <span className="badge badge--err"> 저장 실패</span>
+              )}
+            </span>
+            <div className="slide">
+              <SlideView
+                slide={slide}
+                answer={answers[slide.id] ?? null}
+                onChange={(next) => save(slide.id, next)}
+                comment=""
+                onCommentChange={() => {}}
+                showComment={false}
+              />
+            </div>
+          </section>
+        ))}
+
+        {saveError && <p className="error">{saveError}</p>}
+
+        {remaining === 0 && (
+          <div className="card">
+            <p className="notice">모든 문항에 답했습니다. 참여해 주셔서 감사합니다.</p>
+          </div>
         )}
       </main>
     </div>

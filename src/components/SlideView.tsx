@@ -14,13 +14,20 @@ export function SlideView({
   onChange,
   comment,
   onCommentChange,
+  showComment = true,
 }: {
-  slide: Pick<Slide, 'type' | 'title' | 'body' | 'options' | 'multi'>
+  slide: Pick<Slide, 'type' | 'title' | 'body' | 'options' | 'multi'> &
+    Partial<Pick<Slide, 'comment_enabled'>>
   answer: Answer | null
   onChange: (next: Answer) => void
   comment: string
   onCommentChange: (next: string) => void
+  /** 종료 후 보충 응답처럼 의견란을 아예 빼야 하는 화면에서 끕니다. */
+  showComment?: boolean
 }) {
+  // 의견란은 문항 옵션(기본 켜짐)과 화면 사정 둘 다 허락할 때만 나옵니다.
+  const commentVisible = showComment && (slide.comment_enabled ?? true)
+
   return (
     <>
       <h1 className="slide__title">{slide.title || '(제목 없음)'}</h1>
@@ -29,7 +36,7 @@ export function SlideView({
       <AnswerInput slide={slide} answer={answer} onChange={onChange} />
 
       {/* 안내 페이지를 포함해 모든 항목에서 의견을 남길 수 있습니다. */}
-      <CommentBox value={comment} onCommit={onCommentChange} />
+      {commentVisible && <CommentBox value={comment} onCommit={onCommentChange} />}
     </>
   )
 }
@@ -135,6 +142,14 @@ function ChoiceList({
   )
 }
 
+/**
+ * 항목별 자유 의견.
+ *
+ * 예전에는 입력이 멈추면 조용히 저장했는데, 참가자 입장에서 "내 의견이
+ * 들어갔는지"를 확신할 수 없었습니다. 지금은 [입력] 버튼을 눌러야 저장되고,
+ * 저장된 내용이 그대로 화면에 남아 반영을 눈으로 확인할 수 있습니다.
+ * 평소에는 한 줄짜리 버튼으로 접혀 있어 문항을 가리지 않습니다.
+ */
 function CommentBox({
   value,
   onCommit,
@@ -142,19 +157,98 @@ function CommentBox({
   value: string
   onCommit: (next: string) => void
 }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const [justSaved, setJustSaved] = useState(false)
+  const savedTimer = useRef<number | undefined>(undefined)
+
+  // 서버에서 기존 의견이 로드되면 초안도 맞춰 줍니다.
+  useEffect(() => {
+    setDraft(value)
+  }, [value])
+
+  useEffect(() => () => window.clearTimeout(savedTimer.current), [])
+
+  const submit = () => {
+    onCommit(draft.trim())
+    setEditing(false)
+    setJustSaved(true)
+    window.clearTimeout(savedTimer.current)
+    savedTimer.current = window.setTimeout(() => setJustSaved(false), 2500)
+  }
+
+  if (!editing) {
+    // 의견이 없으면 한 줄 버튼만. 있으면 저장된 내용을 보여 줍니다.
+    if (!value) {
+      return (
+        <div className="comment comment--compact">
+          <button
+            type="button"
+            className="comment__add"
+            onClick={() => {
+              setDraft('')
+              setEditing(true)
+            }}
+          >
+            ＋ 의견 남기기 <span className="comment__optional">(선택)</span>
+          </button>
+          {justSaved && <span className="comment__saved-badge">입력됨 ✓</span>}
+        </div>
+      )
+    }
+    return (
+      <div className="comment comment--compact">
+        <div className="comment__view">
+          <span className="comment__label">
+            내 의견
+            {justSaved && <span className="comment__saved-badge"> 입력됨 ✓</span>}
+          </span>
+          <p className="comment__text">{value}</p>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost comment__edit"
+            onClick={() => {
+              setDraft(value)
+              setEditing(true)
+            }}
+          >
+            수정
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="comment">
+    <div className="comment comment--compact">
       <label className="comment__label" htmlFor="slide-comment">
-        추가 의견 <span className="comment__optional">(선택)</span>
+        의견 <span className="comment__optional">(선택)</span>
       </label>
-      <DebouncedTextarea
+      <textarea
         id="slide-comment"
         className="comment__input"
-        value={value}
-        placeholder="이 항목에 대해 덧붙이고 싶은 말이 있으면 적어 주세요"
-        rows={3}
-        onCommit={onCommit}
+        value={draft}
+        maxLength={1000}
+        rows={2}
+        autoFocus
+        placeholder="덧붙이고 싶은 말을 적고 [입력]을 눌러 주세요"
+        onChange={(e) => setDraft(e.target.value)}
       />
+      <div className="comment__actions">
+        <button type="button" className="btn btn--sm btn--primary" onClick={submit}>
+          입력
+        </button>
+        <button
+          type="button"
+          className="btn btn--sm btn--ghost"
+          onClick={() => {
+            setDraft(value)
+            setEditing(false)
+          }}
+        >
+          취소
+        </button>
+      </div>
     </div>
   )
 }

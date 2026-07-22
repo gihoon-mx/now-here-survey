@@ -23,6 +23,8 @@ export interface Session {
   name: string
   status: SessionStatus
   current_page_index: number
+  /** 현재 페이지가 참가자에게 열렸는지. false 면 대기 화면입니다. */
+  page_revealed: boolean
   started_at: string | null
   current_page_started_at: string | null
   ended_at: string | null
@@ -64,6 +66,8 @@ export interface Slide {
   options: RawOption[]
   multi: boolean
   required: boolean
+  /** 항목별 자유 의견란 표시 여부 (기본 켜짐) */
+  comment_enabled: boolean
 }
 
 /** 페이지 순서 → 페이지 안 순서로 문항을 설문 전체 순서로 폅니다. */

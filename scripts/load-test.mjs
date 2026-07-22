@@ -253,6 +253,8 @@ for (const c of connected) c.events.length = 0
 
 const sentAt = Date.now()
 await admin.rpc('start_session', { p_session_id: session.id })
+// 첫 페이지는 대기 상태로 시작하므로 바로 엽니다 (실제 진행과 같은 순서).
+await admin.rpc('reveal_page', { p_session_id: session.id })
 await wait(4000)
 
 const missedStart = []
@@ -316,9 +318,13 @@ for (let s = 0; s < slides.length; s++) {
     for (const c of connected) c.events.length = 0
     const moveAt = Date.now()
     await admin.rpc('move_page', { p_session_id: session.id, p_delta: 1 })
+    // 이동 직후 바로 열어, 참가자가 응답할 수 있는 상태로 만듭니다.
+    await admin.rpc('reveal_page', { p_session_id: session.id })
     await wait(3000)
     for (const c of connected) {
-      const hit = c.events.find((e) => e.row.current_page_index === s + 1)
+      const hit = c.events.find(
+        (e) => e.row.current_page_index === s + 1 && e.row.page_revealed,
+      )
       moveLatencies.push(hit ? hit.at - moveAt : undefined)
     }
   }
