@@ -136,16 +136,57 @@ set search_path = public
 as $$
 declare
   v_participant public.participants%rowtype;
+  v_matches     int;
 begin
   if auth.uid() is null then
     raise exception '로그인 세션이 없습니다. 새로고침 후 다시 시도해 주세요.';
   end if;
 
-  select * into v_participant
+  /*
+   * 같은 아이디/비밀번호가 여러 설문에 등록돼 있을 수 있습니다.
+   * 하루에 세 차례로 나눠 진행하면서 같은 아이디 체계를 재사용하는 경우가
+   * 그렇습니다. 그때 아무 설문이나 골라 넣으면 오전 참가자가 오후 설문에
+   * 들어가 버리고, 응답이 엉뚱한 곳에 쌓입니다.
+   *
+   * 그래서 "지금 진행 중인 설문"을 먼저 찾습니다. 한 번에 하나만 진행하는
+   * 것이 정상이므로 이걸로 대부분 갈립니다. 그래도 갈리지 않으면 조용히
+   * 아무 데나 넣지 않고 실패시킵니다 — 잘못된 방에 들어가는 것보다
+   * 들어가지 못하는 편이 낫습니다.
+   */
+  select count(*) into v_matches
   from public.participants p
+  join public.sessions s on s.id = p.session_id
   where lower(p.login_id) = lower(trim(p_login_id))
     and p.passcode = trim(p_passcode)
-  limit 1;
+    and s.status = 'live';
+
+  if v_matches > 1 then
+    raise exception '이 아이디가 여러 설문에 등록되어 있습니다. 진행자에게 문의해 주세요.';
+  end if;
+
+  if v_matches = 1 then
+    select p.* into v_participant
+    from public.participants p
+    join public.sessions s on s.id = p.session_id
+    where lower(p.login_id) = lower(trim(p_login_id))
+      and p.passcode = trim(p_passcode)
+      and s.status = 'live';
+  else
+    -- 진행 중인 설문이 없으면(아직 시작 전) 등록된 곳이 한 군데일 때만 넣습니다.
+    select count(*) into v_matches
+    from public.participants p
+    where lower(p.login_id) = lower(trim(p_login_id))
+      and p.passcode = trim(p_passcode);
+
+    if v_matches > 1 then
+      raise exception '이 아이디가 여러 설문에 등록되어 있습니다. 진행자에게 문의해 주세요.';
+    end if;
+
+    select * into v_participant
+    from public.participants p
+    where lower(p.login_id) = lower(trim(p_login_id))
+      and p.passcode = trim(p_passcode);
+  end if;
 
   if v_participant.id is null then
     raise exception '아이디 또는 비밀번호가 올바르지 않습니다.';

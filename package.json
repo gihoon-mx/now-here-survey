@@ -11,7 +11,8 @@
     "smoke": "node scripts/smoke-test.mjs",
     "realtime": "node scripts/realtime-test.mjs",
     "render-check": "node scripts/render-check.mjs",
-    "loadtest": "node scripts/load-test.mjs"
+    "loadtest": "node scripts/load-test.mjs",
+    "multi": "node scripts/multi-session-test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
