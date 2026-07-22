@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "smoke": "node scripts/smoke-test.mjs",
-    "realtime": "node scripts/realtime-test.mjs"
+    "realtime": "node scripts/realtime-test.mjs",
+    "render-check": "node scripts/render-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",

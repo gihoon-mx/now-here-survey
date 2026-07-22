@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { SLIDE_TYPE_LABEL, type Slide, type SlideType } from '../lib/types'
+import { SlideView } from './SlideView'
+import { SLIDE_TYPE_LABEL, type Answer, type Slide, type SlideType } from '../lib/types'
 
 const DEFAULT_OPTIONS: Record<SlideType, string[]> = {
   choice: ['매우 그렇다', '그렇다', '보통이다', '그렇지 않다', '전혀 그렇지 않다'],
@@ -52,9 +53,7 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
   }
 
   const patch = async (id: string, changes: Partial<Slide>) => {
-    setSlides((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, ...changes } : s)),
-    )
+    setSlides((prev) => prev.map((s) => (s.id === id ? { ...s, ...changes } : s)))
     const { error: updateError } = await supabase
       .from('slides')
       .update(changes)
@@ -133,94 +132,161 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
                 <button className="icon-btn" title="아래로" onClick={() => move(slide.id, 1)}>
                   ↓
                 </button>
-                <button className="icon-btn icon-btn--danger" title="삭제" onClick={() => remove(slide.id)}>
+                <button
+                  className="icon-btn icon-btn--danger"
+                  title="삭제"
+                  onClick={() => remove(slide.id)}
+                >
                   ✕
                 </button>
               </div>
             </div>
 
             {openId === slide.id && (
-              <div className="slide-card__body">
-                <label className="field">
-                  <span>{slide.type === 'info' ? '안내 제목' : '질문'}</span>
-                  <input
-                    value={slide.title}
-                    onChange={(e) => patch(slide.id, { title: e.target.value })}
-                  />
-                </label>
-
-                <label className="field">
-                  <span>설명 (선택)</span>
-                  <textarea
-                    rows={2}
-                    value={slide.body ?? ''}
-                    onChange={(e) => patch(slide.id, { body: e.target.value })}
-                  />
-                </label>
-
-                {slide.type === 'choice' && (
-                  <>
-                    <label className="field">
-                      <span>선택지 — 한 줄에 하나</span>
-                      <textarea
-                        rows={5}
-                        value={slide.options.join('\n')}
-                        onChange={(e) =>
-                          patch(slide.id, {
-                            options: e.target.value
-                              .split('\n')
-                              .map((v) => v.trim())
-                              .filter(Boolean),
-                          })
-                        }
-                      />
-                    </label>
-                    <label className="check">
-                      <input
-                        type="checkbox"
-                        checked={slide.multi}
-                        onChange={(e) => patch(slide.id, { multi: e.target.checked })}
-                      />
-                      <span>복수 선택 허용</span>
-                    </label>
-                  </>
-                )}
-
-                {slide.type === 'ox' && (
-                  <label className="field">
-                    <span>두 선택지 — 한 줄에 하나</span>
-                    <textarea
-                      rows={2}
-                      value={slide.options.join('\n')}
-                      onChange={(e) =>
-                        patch(slide.id, {
-                          options: e.target.value
-                            .split('\n')
-                            .map((v) => v.trim())
-                            .filter(Boolean)
-                            .slice(0, 2),
-                        })
-                      }
-                    />
-                  </label>
-                )}
-
-                {slide.type === 'info' && (
-                  <p className="muted">
-                    안내 페이지에는 응답 입력란이 표시되지 않습니다.
-                  </p>
-                )}
-
-                {slide.type === 'text' && (
-                  <p className="muted">
-                    참가자에게 자유 입력란(최대 1000자)이 표시됩니다.
-                  </p>
-                )}
-              </div>
+              <SlideForm slide={slide} onPatch={(c) => patch(slide.id, c)} />
             )}
           </li>
         ))}
       </ol>
+    </div>
+  )
+}
+
+/* --------------------------------------------------------- 항목 편집 폼 */
+
+function SlideForm({
+  slide,
+  onPatch,
+}: {
+  slide: Slide
+  onPatch: (changes: Partial<Slide>) => void
+}) {
+  // 미리보기에서 눌러 본 선택은 저장되지 않습니다. 화면이 어떻게 반응하는지
+  // 확인하는 용도라, 이 컴포넌트 안에만 둡니다.
+  const [previewAnswer, setPreviewAnswer] = useState<Answer | null>(null)
+
+  const setOption = (index: number, value: string) => {
+    const next = [...slide.options]
+    next[index] = value
+    onPatch({ options: next })
+  }
+
+  const addOption = () => onPatch({ options: [...slide.options, ''] })
+
+  const removeOption = (index: number) =>
+    onPatch({ options: slide.options.filter((_, i) => i !== index) })
+
+  const moveOption = (index: number, delta: number) => {
+    const to = index + delta
+    if (to < 0 || to >= slide.options.length) return
+    const next = [...slide.options]
+    const [moved] = next.splice(index, 1)
+    next.splice(to, 0, moved)
+    onPatch({ options: next })
+  }
+
+  const hasOptions = slide.type === 'choice' || slide.type === 'ox'
+
+  return (
+    <div className="slide-card__body">
+      <label className="field">
+        <span>{slide.type === 'info' ? '안내 제목' : '질문'}</span>
+        <input
+          value={slide.title}
+          onChange={(e) => onPatch({ title: e.target.value })}
+        />
+      </label>
+
+      <label className="field">
+        <span>설명 (선택)</span>
+        <textarea
+          rows={2}
+          value={slide.body ?? ''}
+          onChange={(e) => onPatch({ body: e.target.value })}
+        />
+      </label>
+
+      {hasOptions && (
+        <div className="field">
+          <span>선택지</span>
+          <ul className="option-list">
+            {slide.options.map((option, i) => (
+              <li key={i} className="option-row">
+                <input
+                  value={option}
+                  placeholder={`선택지 ${i + 1}`}
+                  onChange={(e) => setOption(i, e.target.value)}
+                />
+                <button
+                  className="icon-btn"
+                  title="위로"
+                  onClick={() => moveOption(i, -1)}
+                  disabled={i === 0}
+                >
+                  ↑
+                </button>
+                <button
+                  className="icon-btn"
+                  title="아래로"
+                  onClick={() => moveOption(i, 1)}
+                  disabled={i === slide.options.length - 1}
+                >
+                  ↓
+                </button>
+                <button
+                  className="icon-btn icon-btn--danger"
+                  title="삭제"
+                  onClick={() => removeOption(i)}
+                >
+                  ✕
+                </button>
+              </li>
+            ))}
+          </ul>
+          {/* OX 는 두 개를 넘기지 않습니다. 화면이 두 개 기준으로 그려집니다. */}
+          {!(slide.type === 'ox' && slide.options.length >= 2) && (
+            <button className="btn btn--sm" onClick={addOption}>
+              + 선택지 추가
+            </button>
+          )}
+        </div>
+      )}
+
+      {slide.type === 'choice' && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={slide.multi}
+            onChange={(e) => onPatch({ multi: e.target.checked })}
+          />
+          <span>복수 선택 허용</span>
+        </label>
+      )}
+
+      {slide.type === 'info' && (
+        <p className="muted">안내 페이지에는 응답 입력란이 표시되지 않습니다.</p>
+      )}
+
+      {slide.type === 'text' && (
+        <p className="muted">참가자에게 자유 입력란(최대 1000자)이 표시됩니다.</p>
+      )}
+
+      {/* 참가자 화면과 같은 컴포넌트로 그리므로 실제 모습과 어긋나지 않습니다. */}
+      <div className="preview">
+        <div className="preview__label">참가자 화면 미리보기</div>
+        <div className="preview__frame">
+          <div className="slide">
+            <SlideView
+              slide={slide}
+              answer={previewAnswer}
+              onChange={setPreviewAnswer}
+            />
+          </div>
+        </div>
+        <p className="preview__note">
+          여기서 누른 선택은 저장되지 않습니다.
+        </p>
+      </div>
     </div>
   )
 }

@@ -690,7 +690,110 @@ textarea {
   padding-top: 12px;
 }
 
+/* 선택지 편집 행 */
+
+.option-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.option-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.option-row .icon-btn {
+  flex: none;
+}
+
+.option-row .icon-btn:disabled {
+  opacity: 0.3;
+}
+
+/* 참가자 화면 미리보기 */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.preview__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* 폰 화면처럼 보이게 감싸서, 편집 폼과 시각적으로 구분되게 합니다. */
+.preview__frame {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  max-width: 380px;
+}
+
+.preview__note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* 참가자 추가 폼 */
+
+.field-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 4px;
+}
+
+.input-with-btn input {
+  min-width: 0;
+}
+
+.row-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.row--editing {
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+}
+
+.row--editing input {
+  padding: 8px;
+  font-size: 0.9rem;
+}
+
 /* -------------------------------------------------------------- 표 */
+
+/* 좁은 화면에서 표가 페이지를 밀어내지 않고 표 안에서만 가로로 스크롤되게 합니다. */
+.table-wrap {
+  overflow-x: auto;
+}
 
 .table {
   width: 100%;
