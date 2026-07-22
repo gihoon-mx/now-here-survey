@@ -25,9 +25,20 @@ const env = Object.fromEntries(
     }),
 )
 
+// 관리자 계정은 .env.local 에 넣어 두면 매번 환경변수로 넘기지 않아도 됩니다.
+try {
+  for (const line of readFileSync(join(root, '.env.local'), 'utf8').split('\n')) {
+    const t = line.trim()
+    if (!t || t.startsWith('#')) continue
+    const i = t.indexOf('=')
+    if (i > 0) env[t.slice(0, i).trim()] ??= t.slice(i + 1).trim()
+  }
+} catch { /* .env.local 이 없으면 환경변수만 씁니다 */ }
+
 const U = env.VITE_SUPABASE_URL
 const K = env.VITE_SUPABASE_KEY
-const { ADMIN_EMAIL, ADMIN_PASSWORD } = process.env
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? env.ADMIN_EMAIL
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? env.ADMIN_PASSWORD
 if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
   console.error('ADMIN_EMAIL 과 ADMIN_PASSWORD 환경변수가 필요합니다.')
   process.exit(1)

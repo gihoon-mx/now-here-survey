@@ -203,6 +203,11 @@ begin
   end if;
 end $$;
 
+-- 기존 설치에는 page_id 열이 없습니다. create table if not exists 는 이미 있는
+-- 테이블을 건드리지 않으므로 여기서 직접 추가합니다.
+alter table public.slides
+  add column if not exists page_id uuid references public.pages(id) on delete cascade;
+
 -- 페이지가 없는 문항에 페이지를 하나씩 만들어 붙입니다. 이미 이행된 문항은
 -- 건드리지 않으므로 재실행해도 안전합니다.
 do $$

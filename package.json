@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "apply-schema": "node scripts/apply-schema.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "realtime": "node scripts/realtime-test.mjs",
     "render-check": "node scripts/render-check.mjs",

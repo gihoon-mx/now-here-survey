@@ -47,7 +47,13 @@
 > `npm run smoke` 로 언제든 상태를 확인할 수 있습니다. 아래 절차는 프로젝트를
 > 새로 만들거나 초기화할 때를 위한 기록입니다.
 
-1. `supabase/schema.sql` 전체를 **SQL Editor** 에 붙여넣고 실행합니다.
+1. `supabase/schema.sql` 을 적용합니다. 두 가지 방법이 있습니다.
+   - **`npm run apply-schema`** — Management API 로 한 번에 실행합니다.
+     `.env.local` 에 `SUPABASE_ACCESS_TOKEN=sbp_...` 이 있어야 합니다
+     (발급: https://supabase.com/dashboard/account/tokens — 이 파일은
+     커밋되지 않습니다).
+   - 또는 파일 전체를 **SQL Editor** 에 붙여넣고 실행합니다.
+
    재실행해도 안전하게 작성되어 있습니다.
 
    > ⚠️ 스키마가 바뀐 버전을 배포할 때는 **schema.sql 을 먼저 실행한 뒤**
@@ -310,13 +316,17 @@ npm run dev
 
 ### 스모크 테스트
 
-스키마나 RLS 정책을 건드린 뒤에는 이걸 돌려 주세요. 실제 앱과 똑같이 공개 anon
-키로만 접근해서, 참가자가 넘볼 수 없어야 할 것들이 정말 막혀 있는지까지
-확인합니다.
+스키마나 RLS 정책을 건드린 뒤에는 `npm run apply-schema` 로 적용하고 이걸 돌려
+주세요. 실제 앱과 똑같이 공개 anon 키로만 접근해서, 참가자가 넘볼 수 없어야
+할 것들이 정말 막혀 있는지까지 확인합니다.
 
 ```bash
-ADMIN_EMAIL=관리자이메일 ADMIN_PASSWORD=비밀번호 npm run smoke
+npm run smoke
 ```
+
+관리자 계정은 `.env.local` 의 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 에서 읽습니다.
+없으면 환경변수로 넘길 수도 있습니다:
+`ADMIN_EMAIL=관리자이메일 ADMIN_PASSWORD=비밀번호 npm run smoke`
 
 RLS 는 조용히 열리고 조용히 막히는 게 문제라, 눈으로 보고 넘어가면 놓치기
 쉽습니다. 52개 항목이 모두 PASS 여야 정상입니다.
