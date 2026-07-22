@@ -6,6 +6,7 @@ import SlideEditor from '../components/SlideEditor'
 import ParticipantManager from '../components/ParticipantManager'
 import LiveControl from '../components/LiveControl'
 import ResultsExport from '../components/ResultsExport'
+import TestRun from '../components/TestRun'
 
 export default function AdminPage() {
   const [checking, setChecking] = useState(true)
@@ -112,6 +113,8 @@ function SessionList() {
   const [sessions, setSessions] = useState<Session[]>([])
   const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(true)
+  const [copying, setCopying] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
   const load = async () => {
@@ -139,6 +142,27 @@ function SessionList() {
     if (!error && data) navigate(`/admin/${(data as Session).id}`)
   }
 
+  /**
+   * 문항만 복제합니다. 참가자는 개인별 비밀번호가 딸려 있어 조용히 따라오면
+   * 어느 설문의 명단인지 헷갈리므로 가져오지 않습니다. 같은 인원으로 다시
+   * 돌릴 때는 참가자 탭의 "현재 명단 내려받기" 로 옮기면 됩니다.
+   */
+  const duplicate = async (source: Session) => {
+    const name = prompt('새 설문 제목', `${source.title} (사본)`)
+    if (name === null) return
+
+    setCopying(source.id)
+    setError(null)
+    const { data, error: rpcError } = await supabase.rpc('duplicate_session', {
+      p_session_id: source.id,
+      p_title: name,
+    })
+    setCopying(null)
+
+    if (rpcError) setError(rpcError.message)
+    else if (data) navigate(`/admin/${data as string}`)
+  }
+
   return (
     <div className="screen admin">
       <header className="admin__header">
@@ -157,6 +181,8 @@ function SessionList() {
         <button className="btn btn--primary">만들기</button>
       </form>
 
+      {error && <p className="error">{error}</p>}
+
       {loading ? (
         <p className="muted">불러오는 중…</p>
       ) : sessions.length === 0 ? (
@@ -164,11 +190,19 @@ function SessionList() {
       ) : (
         <ul className="list">
           {sessions.map((s) => (
-            <li key={s.id}>
+            <li key={s.id} className="list__row">
               <Link className="list__item" to={`/admin/${s.id}`}>
                 <span className="list__title">{s.title}</span>
                 <StatusBadge status={s.status} />
               </Link>
+              <button
+                className="btn btn--sm"
+                title="문항을 그대로 둔 새 설문 만들기"
+                disabled={copying === s.id}
+                onClick={() => duplicate(s)}
+              >
+                {copying === s.id ? '복사 중…' : '복사'}
+              </button>
             </li>
           ))}
         </ul>
@@ -182,7 +216,7 @@ function StatusBadge({ status }: { status: Session['status'] }) {
   return <span className={`badge badge--${status}`}>{label}</span>
 }
 
-type Tab = 'control' | 'slides' | 'participants' | 'results'
+type Tab = 'control' | 'slides' | 'test' | 'participants' | 'results'
 
 function SessionDetail({ sessionId }: { sessionId: string }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -229,6 +263,7 @@ function SessionDetail({ sessionId }: { sessionId: string }) {
           [
             ['control', '진행'],
             ['slides', '문항'],
+            ['test', '테스트'],
             ['participants', '참가자'],
             ['results', '결과'],
           ] as [Tab, string][]
@@ -245,6 +280,7 @@ function SessionDetail({ sessionId }: { sessionId: string }) {
 
       {tab === 'control' && <LiveControl sessionId={sessionId} />}
       {tab === 'slides' && <SlideEditor sessionId={sessionId} />}
+      {tab === 'test' && <TestRun sessionId={sessionId} />}
       {tab === 'participants' && <ParticipantManager sessionId={sessionId} />}
       {tab === 'results' && (
         <ResultsExport sessionId={sessionId} sessionTitle={session.title} />

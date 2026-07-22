@@ -143,6 +143,98 @@ const empty = render({ type: 'choice', title: '', body: null, options: [], multi
 check('제목이 비어도 죽지 않음', empty.includes('(제목 없음)'))
 check('선택지가 없어도 안내만 표시', empty.includes('선택지가 아직 없습니다'))
 
+/* ------------------------------------------------ 문항 import / export */
+console.log('\n[문항 파일 왕복]')
+
+const XLSX = await server.ssrLoadModule('xlsx')
+const excel = await server.ssrLoadModule('/src/lib/excel.ts')
+
+// 선택지 한 칸 안에서 라벨과 설명이 온전히 되살아나는지.
+const roundTripCell = excel.cellToOptions(
+  excel.optionsToCell([
+    { label: '매우 그렇다', description: '기대보다 좋았다' },
+    { label: '보통' },
+    { label: '아니다', description: '다시 오지 않겠다' },
+  ]),
+)
+check('선택지 3개가 그대로 복원됨', roundTripCell.length === 3)
+check('설명이 붙은 선택지 복원',
+  roundTripCell[0].label === '매우 그렇다' &&
+  roundTripCell[0].description === '기대보다 좋았다')
+check('설명 없는 선택지는 설명이 비어 있음',
+  roundTripCell[1].label === '보통' && roundTripCell[1].description === undefined)
+
+// 라벨에 구분자가 없는 평범한 입력도 문제없어야 합니다.
+check('구분자 없는 단순 입력', excel.cellToOptions('A | B | C').length === 3)
+check('빈 칸은 선택지 없음', excel.cellToOptions('').length === 0)
+
+/** 워크북을 실제 파일처럼 만들어 parseSlideFile 에 넘깁니다. */
+const asFile = (workbook, name) => {
+  const buf = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
+  return new File([buf], name, {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+}
+
+const template = await excel.parseSlideFile(asFile(excel.buildSlideTemplate(), 't.xlsx'))
+check('양식 파일이 그대로 읽힘', template.length === 4, `${template.length}행`)
+check('양식 — 유형이 코드로 변환됨',
+  template.map((r) => r.type).join(',') === 'info,choice,ox,text',
+  template.map((r) => r.type).join(','))
+check('양식 — OX 선택지 설명 보존',
+  template[2].options[0].description === '참여하겠다')
+
+// 내보낸 문항을 다시 가져오는 경로 (실제로 가장 많이 쓰게 될 흐름).
+const exported = excel.buildSlideWorkbook([
+  { order_index: 0, type: 'info', title: '안내', body: '설명입니다', options: [], multi: false },
+  {
+    order_index: 1,
+    type: 'choice',
+    title: '복수 문항',
+    body: null,
+    options: [{ label: 'A', description: '가' }, { label: 'B' }],
+    multi: true,
+  },
+])
+const reimported = await excel.parseSlideFile(asFile(exported, 'e.xlsx'))
+check('내보낸 문항을 다시 가져옴', reimported.length === 2)
+check('제목·설명 보존',
+  reimported[0].title === '안내' && reimported[0].body === '설명입니다')
+check('선택지 설명 보존', reimported[1].options[0].description === '가')
+check('복수 선택 여부 보존', reimported[1].multi === true && reimported[0].multi === false)
+
+// 잘못된 파일은 조용히 넘어가지 않고 어디가 문제인지 알려줘야 합니다.
+const badType = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(
+  badType,
+  XLSX.utils.json_to_sheet([{ 유형: '단답형', 제목: '제목' }]),
+  '문항',
+)
+let badTypeError = ''
+try {
+  await excel.parseSlideFile(asFile(badType, 'b.xlsx'))
+} catch (err) {
+  badTypeError = err.message
+}
+check('알 수 없는 유형은 행 번호와 함께 거부',
+  badTypeError.includes('2행') && badTypeError.includes('단답형'),
+  badTypeError.split('\n')[0])
+
+const noOptions = XLSX.utils.book_new()
+XLSX.utils.book_append_sheet(
+  noOptions,
+  XLSX.utils.json_to_sheet([{ 유형: '다지선다', 제목: '선택지 없는 문항', 선택지: '' }]),
+  '문항',
+)
+let noOptionsError = ''
+try {
+  await excel.parseSlideFile(asFile(noOptions, 'n.xlsx'))
+} catch (err) {
+  noOptionsError = err.message
+}
+check('선택지 없는 다지선다는 거부', noOptionsError.includes('선택지가 없습니다'),
+  noOptionsError.split('\n')[0])
+
 await server.close()
 console.log(`\n===== ${pass} passed, ${fail} failed =====`)
 process.exit(fail > 0 ? 1 : 0)

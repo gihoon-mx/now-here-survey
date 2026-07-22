@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { SlideView } from './SlideView'
+import {
+  buildSlideTemplate,
+  buildSlideWorkbook,
+  downloadWorkbook,
+  parseSlideFile,
+} from '../lib/excel'
 import {
   SLIDE_TYPE_LABEL,
   slideOptions,
@@ -28,6 +34,12 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
   const [loading, setLoading] = useState(true)
   const [openId, setOpenId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  // 같은 파일 선택창을 "뒤에 추가"와 "전체 교체"가 함께 쓰기 때문에,
+  // 어느 버튼으로 열었는지 기억해 둡니다.
+  const importMode = useRef<'replace' | 'append'>('append')
 
   const load = async () => {
     const { data } = await supabase
@@ -106,6 +118,51 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
     )
   }
 
+  /* ------------------------------------------------- 파일로 가져오기/내보내기 */
+
+  const importSlides = async (file: File, mode: 'replace' | 'append') => {
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+
+    try {
+      const parsed = await parseSlideFile(file)
+
+      if (mode === 'replace') {
+        if (
+          !confirm(
+            `기존 문항 ${slides.length}개를 지우고 ${parsed.length}개로 교체합니다.\n` +
+              '이미 받은 응답도 함께 지워집니다. 계속할까요?',
+          )
+        )
+          return
+        await supabase.from('slides').delete().eq('session_id', sessionId)
+      }
+
+      const base = mode === 'replace' ? 0 : slides.length
+      const { error: insertError } = await supabase.from('slides').insert(
+        parsed.map((row, i) => ({
+          session_id: sessionId,
+          order_index: base + i,
+          type: row.type,
+          title: row.title,
+          body: row.body || null,
+          options: row.options,
+          multi: row.multi,
+        })),
+      )
+      if (insertError) throw new Error(insertError.message)
+
+      setNotice(`문항 ${parsed.length}개를 가져왔습니다.`)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '가져오기에 실패했습니다.')
+    } finally {
+      setBusy(false)
+      if (fileInput.current) fileInput.current.value = ''
+    }
+  }
+
   if (loading) return <p className="muted">불러오는 중…</p>
 
   return (
@@ -118,7 +175,68 @@ export default function SlideEditor({ sessionId }: { sessionId: string }) {
         ))}
       </div>
 
+      <div className="card">
+        <h2>파일로 문항 관리</h2>
+        <p className="muted">
+          엑셀(.xlsx) 또는 CSV. 선택지는 <code>|</code> 로 구분하고, 설명을 붙일
+          때는 <code>라벨 :: 설명</code> 으로 씁니다.
+          <br />
+          내보낸 파일은 그대로 다시 가져올 수 있습니다.
+        </p>
+        <div className="row">
+          <button
+            className="btn btn--sm"
+            onClick={() => downloadWorkbook(buildSlideTemplate(), '문항_양식.xlsx')}
+          >
+            양식 내려받기
+          </button>
+          {slides.length > 0 && (
+            <button
+              className="btn btn--sm"
+              onClick={() =>
+                downloadWorkbook(buildSlideWorkbook(slides), '문항.xlsx')
+              }
+            >
+              문항 내보내기
+            </button>
+          )}
+          <button
+            className="btn btn--sm btn--primary"
+            disabled={busy}
+            onClick={() => {
+              importMode.current = 'append'
+              fileInput.current?.click()
+            }}
+          >
+            {busy ? '가져오는 중…' : '뒤에 추가'}
+          </button>
+          {slides.length > 0 && (
+            <button
+              className="btn btn--sm"
+              disabled={busy}
+              onClick={() => {
+                importMode.current = 'replace'
+                fileInput.current?.click()
+              }}
+            >
+              전체 교체
+            </button>
+          )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void importSlides(file, importMode.current)
+            }}
+          />
+        </div>
+      </div>
+
       {error && <p className="error">{error}</p>}
+      {notice && <p className="notice">{notice}</p>}
 
       {slides.length === 0 && (
         <p className="muted">위 버튼으로 항목을 추가해 주세요.</p>

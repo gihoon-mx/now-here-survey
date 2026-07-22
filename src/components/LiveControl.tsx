@@ -156,6 +156,9 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
             <strong>결과</strong> 탭에서 엑셀로 내려받을 수 있습니다.
           </p>
         </div>
+
+        {error && <p className="error">{error}</p>}
+        <ResetButton sessionId={sessionId} onDone={() => setError(null)} />
       </div>
     )
 
@@ -244,6 +247,80 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
             다음 →
           </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * 응답을 지우고 준비 중 상태로 되돌립니다.
+ *
+ * 되돌릴 수 없는 동작이라 두 단계로 나눴습니다. 리허설 직후에 누르는 것이
+ * 정상 흐름이지만, 본 진행이 끝난 화면에서도 같은 자리에 있기 때문에
+ * 실수로 눌러 응답을 날리는 일을 막아야 합니다.
+ */
+function ResetButton({
+  sessionId,
+  onDone,
+}: {
+  sessionId: string
+  onDone: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const reset = async () => {
+    setBusy(true)
+    setError(null)
+    const { error: rpcError } = await supabase.rpc('reset_session', {
+      p_session_id: sessionId,
+    })
+    if (rpcError) setError(rpcError.message)
+    else {
+      setConfirming(false)
+      onDone()
+    }
+    setBusy(false)
+  }
+
+  if (!confirming)
+    return (
+      <div className="card">
+        <h2>다시 시작하기</h2>
+        <p className="muted">
+          받은 응답을 모두 지우고 준비 중 상태로 되돌립니다. 리허설을 마치고 본
+          진행을 시작할 때 사용합니다.
+        </p>
+        <p className="warn">
+          결과가 필요하면 <strong>먼저 결과 탭에서 엑셀로 내려받으세요.</strong>{' '}
+          지운 응답은 되돌릴 수 없습니다.
+        </p>
+        <button className="btn" onClick={() => setConfirming(true)}>
+          다시 시작하기
+        </button>
+      </div>
+    )
+
+  return (
+    <div className="card card--danger">
+      <h2>정말 지울까요?</h2>
+      <p className="muted">
+        이 설문의 응답과 의견이 모두 사라집니다. 문항과 참가자 명단은 그대로
+        남고, 참가자는 다시 로그인하지 않아도 됩니다.
+      </p>
+      {error && <p className="error">{error}</p>}
+      <div className="row">
+        <button className="btn btn--danger" disabled={busy} onClick={reset}>
+          {busy ? '지우는 중…' : '응답을 지우고 다시 시작'}
+        </button>
+        <button
+          className="btn btn--ghost"
+          disabled={busy}
+          onClick={() => setConfirming(false)}
+        >
+          취소
+        </button>
       </div>
     </div>
   )

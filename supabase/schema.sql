@@ -326,6 +326,79 @@ begin
 end;
 $$;
 
+-- 설문 복사. 문항만 복제하고 참가자는 가져오지 않습니다.
+--
+-- 참가자는 특정 개인에게 발급한 비밀번호가 딸려 있어, 복사본에 조용히 딸려
+-- 오면 누가 어느 설문에 속하는지 헷갈립니다. 같은 인원으로 다시 돌릴 때는
+-- 참가자 탭에서 "현재 명단 내려받기" 후 복사본에 올리면 됩니다.
+create or replace function public.duplicate_session(
+  p_session_id uuid,
+  p_title      text default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_new_id uuid;
+  v_title  text;
+begin
+  if not public.is_admin() then
+    raise exception '권한이 없습니다.';
+  end if;
+
+  select coalesce(nullif(trim(p_title), ''), s.title || ' (사본)')
+    into v_title
+  from public.sessions s
+  where s.id = p_session_id;
+
+  if v_title is null then
+    raise exception '원본 설문을 찾을 수 없습니다.';
+  end if;
+
+  insert into public.sessions (title, owner_id)
+  values (v_title, auth.uid())
+  returning id into v_new_id;
+
+  insert into public.slides
+    (session_id, order_index, type, title, body, options, multi, required)
+  select v_new_id, order_index, type, title, body, options, multi, required
+  from public.slides
+  where session_id = p_session_id;
+
+  return v_new_id;
+end;
+$$;
+
+-- 설문 다시 시작하기. 응답을 모두 지우고 준비 중 상태로 되돌립니다.
+--
+-- 참가자의 접속(auth_user_id)은 그대로 둡니다. 리허설 직후 본 진행으로
+-- 넘어갈 때 30명에게 다시 로그인하라고 안내하는 상황을 피하기 위해서입니다.
+-- 참가자 폰은 대기 화면으로 알아서 돌아갑니다.
+create or replace function public.reset_session(p_session_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception '권한이 없습니다.';
+  end if;
+
+  delete from public.responses where session_id = p_session_id;
+
+  update public.sessions
+     set status = 'draft',
+         current_slide_index = 0,
+         started_at = null,
+         current_slide_started_at = null,
+         ended_at = null
+   where id = p_session_id;
+end;
+$$;
+
 create or replace function public.end_session(p_session_id uuid)
 returns void
 language plpgsql
@@ -490,6 +563,8 @@ grant execute on function public.submit_comment(uuid, text)    to authenticated;
 grant execute on function public.start_session(uuid)           to authenticated;
 grant execute on function public.move_slide(uuid, int)         to authenticated;
 grant execute on function public.end_session(uuid)             to authenticated;
+grant execute on function public.duplicate_session(uuid, text) to authenticated;
+grant execute on function public.reset_session(uuid)           to authenticated;
 grant execute on function public.admin_list_participants(uuid) to authenticated;
 
 -- ------------------------------------------------------------

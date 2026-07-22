@@ -6,6 +6,8 @@ import {
   type AdminParticipant,
   type ResponseRow,
   type Slide,
+  type SlideOption,
+  type SlideType,
 } from './types'
 
 /* ------------------------------------------------------------- import */
@@ -107,6 +109,208 @@ export async function parseParticipantFile(
   }
 
   return rows
+}
+
+/* -------------------------------------------------- 문항 import/export */
+
+/**
+ * 선택지는 한 칸에 `|` 로 구분해 담고, 설명이 있으면 `라벨 :: 설명` 으로 씁니다.
+ *
+ *   매우 그렇다 :: 기대보다 좋았다 | 보통 | 아니다
+ *
+ * 라벨과 설명을 두 열로 나누면 스프레드시트에서는 읽기 편하지만, 개수가
+ * 어긋나는 순간 어느 설명이 어느 선택지 것인지 알 수 없게 됩니다. 짝을 붙여
+ * 두면 그런 어긋남 자체가 생기지 않습니다.
+ */
+const OPTION_SEPARATOR = '|'
+const DESCRIPTION_SEPARATOR = '::'
+
+export function optionsToCell(options: SlideOption[]): string {
+  return options
+    .map((o) => (o.description ? `${o.label} ${DESCRIPTION_SEPARATOR} ${o.description}` : o.label))
+    .join(` ${OPTION_SEPARATOR} `)
+}
+
+export function cellToOptions(cell: string): SlideOption[] {
+  return cell
+    .split(OPTION_SEPARATOR)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)
+    .map((chunk) => {
+      const at = chunk.indexOf(DESCRIPTION_SEPARATOR)
+      if (at < 0) return { label: chunk }
+      const label = chunk.slice(0, at).trim()
+      const description = chunk.slice(at + DESCRIPTION_SEPARATOR.length).trim()
+      return description ? { label, description } : { label }
+    })
+    .filter((o) => o.label)
+}
+
+/** 한국어 유형 이름과 영문 코드를 모두 받아 줍니다. */
+const TYPE_FROM_TEXT: Record<string, SlideType> = {
+  choice: 'choice',
+  다지선다: 'choice',
+  객관식: 'choice',
+  ox: 'ox',
+  OX: 'ox',
+  '2지선다': 'ox',
+  양자택일: 'ox',
+  info: 'info',
+  안내: 'info',
+  '안내 페이지': 'info',
+  안내페이지: 'info',
+  text: 'text',
+  주관식: 'text',
+  '주관식 입력': 'text',
+  자유입력: 'text',
+}
+
+export interface SlideImportRow {
+  type: SlideType
+  title: string
+  body: string
+  options: SlideOption[]
+  multi: boolean
+}
+
+const SLIDE_HEADER_ALIASES: Record<string, string> = {
+  유형: 'type',
+  type: 'type',
+  종류: 'type',
+  제목: 'title',
+  title: 'title',
+  질문: 'title',
+  문항: 'title',
+  설명: 'body',
+  body: 'body',
+  본문: 'body',
+  선택지: 'options',
+  options: 'options',
+  보기: 'options',
+  복수선택: 'multi',
+  multi: 'multi',
+}
+
+export async function parseSlideFile(file: File): Promise<SlideImportRow[]> {
+  const buffer = await file.arrayBuffer()
+
+  const workbook = file.name.toLowerCase().endsWith('.csv')
+    ? XLSX.read(decodeCsv(buffer), { type: 'string' })
+    : XLSX.read(buffer, { type: 'array' })
+
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  if (!sheet) throw new Error('파일에서 시트를 찾을 수 없습니다.')
+
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' })
+  if (raw.length === 0) throw new Error('데이터 행이 없습니다.')
+
+  const mapping = new Map<string, string>()
+  for (const header of Object.keys(raw[0])) {
+    const field = SLIDE_HEADER_ALIASES[header.trim().replace(/\s+/g, '')]
+      ?? SLIDE_HEADER_ALIASES[header.trim()]
+    if (field) mapping.set(header, field)
+  }
+
+  const fields = [...mapping.values()]
+  if (!fields.includes('type') || !fields.includes('title')) {
+    throw new Error(
+      '필요한 열을 찾지 못했습니다: 유형, 제목\n' +
+        '첫 줄 헤더를 "유형, 제목, 설명, 선택지, 복수선택" 으로 맞춰 주세요.',
+    )
+  }
+
+  const rows: SlideImportRow[] = []
+  raw.forEach((record, i) => {
+    const cell: Record<string, string> = {}
+    for (const [header, field] of mapping) {
+      cell[field] = String(record[header] ?? '').trim()
+    }
+    // 파일 끝의 빈 행은 조용히 건너뜁니다.
+    if (!cell.type && !cell.title) return
+
+    const type = TYPE_FROM_TEXT[cell.type] ?? TYPE_FROM_TEXT[cell.type?.toLowerCase()]
+    if (!type) {
+      throw new Error(
+        `${i + 2}행: 알 수 없는 유형입니다 — "${cell.type}"\n` +
+          '다지선다 / OX / 안내 페이지 / 주관식 중 하나여야 합니다.',
+      )
+    }
+    if (!cell.title) throw new Error(`${i + 2}행: 제목이 비어 있습니다.`)
+
+    const options = cellToOptions(cell.options ?? '')
+    if (type === 'choice' && options.length === 0) {
+      throw new Error(`${i + 2}행: 다지선다인데 선택지가 없습니다.`)
+    }
+
+    rows.push({
+      type,
+      title: cell.title,
+      body: cell.body ?? '',
+      options: type === 'ox' && options.length === 0
+        ? [{ label: 'O' }, { label: 'X' }]
+        : options,
+      multi: /^(o|y|yes|true|1|예|О)$/i.test(cell.multi ?? ''),
+    })
+  })
+
+  if (rows.length === 0) throw new Error('유효한 문항 행이 없습니다.')
+  return rows
+}
+
+/** 내보낸 파일을 그대로 다시 가져올 수 있는 형식으로 만듭니다. */
+export function buildSlideWorkbook(slides: Slide[]): XLSX.WorkBook {
+  const rows = [...slides]
+    .sort((a, b) => a.order_index - b.order_index)
+    .map((slide) => ({
+      유형: SLIDE_TYPE_LABEL[slide.type],
+      제목: slide.title,
+      설명: slide.body ?? '',
+      선택지: optionsToCell(slideOptions(slide.options)),
+      복수선택: slide.multi ? 'O' : '',
+    }))
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), '문항')
+  return workbook
+}
+
+export function buildSlideTemplate(): XLSX.WorkBook {
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet([
+      {
+        유형: '안내 페이지',
+        제목: '설문 안내',
+        설명: '지금부터 설문을 시작하겠습니다.',
+        선택지: '',
+        복수선택: '',
+      },
+      {
+        유형: '다지선다',
+        제목: '이번 세션은 어떠셨나요?',
+        설명: '',
+        선택지: '매우 좋았다 :: 기대보다 좋았다 | 보통이다 | 아쉬웠다',
+        복수선택: '',
+      },
+      {
+        유형: 'OX',
+        제목: '다음에도 참여하시겠습니까?',
+        설명: '',
+        선택지: 'O :: 참여하겠다 | X :: 참여하지 않겠다',
+        복수선택: '',
+      },
+      {
+        유형: '주관식',
+        제목: '자유롭게 의견을 남겨 주세요',
+        설명: '',
+        선택지: '',
+        복수선택: '',
+      },
+    ]),
+    '문항',
+  )
+  return workbook
 }
 
 /* ------------------------------------------------------------- export */

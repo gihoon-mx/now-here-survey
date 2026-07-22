@@ -259,6 +259,80 @@ const afterEnd = await rpc('submit_response',
   { p_slide_id: slides[2].id, p_answer: { choice: 'X' } }, P2)
 check('종료 후에는 응답 불가', !afterEnd.ok, `status ${afterEnd.status}`)
 
+/* ------------------------------------------------- 9. 복사 / 다시 시작 */
+console.log('\n[9] 복사 / 다시 시작하기')
+
+const beforeReset = await rest(
+  `/responses?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
+check('초기화 전 응답이 있음', beforeReset.data?.length > 0,
+  `${beforeReset.data?.length}건`)
+
+const reset = await rpc('reset_session', { p_session_id: SESSION }, ADMIN)
+check('다시 시작하기', reset.ok, reset.ok ? '' : JSON.stringify(reset.data))
+
+const afterReset = await rest(
+  `/responses?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
+check('응답이 모두 지워짐', afterReset.data?.length === 0,
+  `${afterReset.data?.length}건`)
+
+const resetState = await rest(
+  `/sessions?select=status,current_slide_index,started_at,ended_at&id=eq.${SESSION}`,
+  { token: ADMIN })
+const rs = resetState.data?.[0]
+check('준비 중 상태로 되돌아감',
+  rs?.status === 'draft' && rs?.current_slide_index === 0 &&
+  rs?.started_at === null && rs?.ended_at === null,
+  JSON.stringify(rs))
+
+const keptSlides = await rest(
+  `/slides?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
+check('문항은 남아 있음', keptSlides.data?.length === 4, `${keptSlides.data?.length}개`)
+
+const keptParts = await rest(
+  `/participants?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
+check('참가자 명단도 남아 있음', keptParts.data?.length === 2,
+  `${keptParts.data?.length}명`)
+
+// 참가자는 다시 로그인하지 않아도 됩니다.
+const stillLinked = await rest('/participants?select=login_id', { token: P1 })
+check('참가자 접속이 유지됨', stillLinked.data?.length === 1,
+  JSON.stringify(stillLinked.data))
+
+const dup = await rpc('duplicate_session',
+  { p_session_id: SESSION, p_title: '[자동테스트] 사본' }, ADMIN)
+check('설문 복사', dup.ok && typeof dup.data === 'string',
+  dup.ok ? '' : JSON.stringify(dup.data))
+const COPY = dup.data
+
+const copiedSlides = await rest(
+  `/slides?select=order_index,type,title,options&session_id=eq.${COPY}&order=order_index`,
+  { token: ADMIN })
+check('문항이 순서까지 복제됨',
+  copiedSlides.data?.length === 4 &&
+  copiedSlides.data[1].title === '만족도는?' &&
+  copiedSlides.data[1].options.length === 3,
+  `${copiedSlides.data?.length}개`)
+
+const copiedParts = await rest(
+  `/participants?select=id&session_id=eq.${COPY}`, { token: ADMIN })
+check('참가자는 복제되지 않음', copiedParts.data?.length === 0,
+  `${copiedParts.data?.length}명`)
+
+const copyState = await rest(
+  `/sessions?select=title,status&id=eq.${COPY}`, { token: ADMIN })
+check('사본은 준비 중 상태로 생성됨',
+  copyState.data?.[0]?.status === 'draft' &&
+  copyState.data?.[0]?.title === '[자동테스트] 사본',
+  JSON.stringify(copyState.data?.[0]))
+
+const notAdminReset = await rpc('reset_session', { p_session_id: SESSION }, P1)
+check('참가자는 초기화할 수 없음', !notAdminReset.ok, `status ${notAdminReset.status}`)
+
+const notAdminDup = await rpc('duplicate_session', { p_session_id: SESSION }, P1)
+check('참가자는 복사할 수 없음', !notAdminDup.ok, `status ${notAdminDup.status}`)
+
+await rest(`/sessions?id=eq.${COPY}`, { method: 'DELETE', token: ADMIN })
+
 const del = await rest(`/sessions?id=eq.${SESSION}`, { method: 'DELETE', token: ADMIN })
 check('테스트 세션 삭제 (참가자·응답 연쇄 삭제)', del.ok, `status ${del.status}`)
 

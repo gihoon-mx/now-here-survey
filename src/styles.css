@@ -516,7 +516,15 @@ textarea {
   gap: 8px;
 }
 
+.list__row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .list__item {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -527,6 +535,10 @@ textarea {
   border-radius: var(--radius);
   text-decoration: none;
   color: inherit;
+}
+
+.list__row > .btn {
+  flex: none;
 }
 
 .list__title {
@@ -884,6 +896,56 @@ textarea {
 .row--editing input {
   padding: 8px;
   font-size: 0.9rem;
+}
+
+/* 테스트 진행 */
+
+.testrun {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 실제 진행과 헷갈리지 않도록 배너를 눈에 띄게 둡니다. */
+.testrun__banner {
+  background: var(--warn-soft);
+  border-color: transparent;
+  gap: 4px;
+}
+
+.testrun__banner strong {
+  color: var(--warn);
+}
+
+.testrun__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.testrun__frame {
+  max-width: none;
+}
+
+.testrun__nav {
+  display: flex;
+  gap: 8px;
+}
+
+.testrun__nav .btn {
+  flex: 1;
+}
+
+.testrun__done {
+  text-align: center;
+}
+
+.card--danger {
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }
 
 /* -------------------------------------------------------------- 표 */
