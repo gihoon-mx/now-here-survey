@@ -166,6 +166,24 @@ check('관리자는 RPC 로 비번 조회 가능',
   adminList.ok && adminList.data?.[0]?.passcode?.startsWith('pw'),
   JSON.stringify(adminList.data?.map?.((r) => r.login_id)))
 
+// 파일 일괄 등록 경로. 테이블에 직접 upsert 하면 excluded.passcode 읽기에서
+// 거부되므로 (열 권한은 관리자에게도 적용) 전용 RPC 를 씁니다.
+const bulk = await rpc('admin_upsert_participants', {
+  p_session_id: SESSION,
+  p_rows: [
+    { login_id: 'tester02', passcode: 'pw2222', display_name: '테스터이(수정)' },
+    { login_id: 'tester03', passcode: 'pw3333', display_name: '테스터삼' },
+  ],
+}, ADMIN)
+check('파일 일괄 등록 (upsert RPC)', bulk.ok && bulk.data === 2,
+  bulk.ok ? `${bulk.data}건` : JSON.stringify(bulk.data))
+
+const afterBulk = await rpc('admin_list_participants', { p_session_id: SESSION }, ADMIN)
+check('같은 아이디는 덮어쓰고 새 아이디는 추가됨',
+  afterBulk.data?.length === 3 &&
+  afterBulk.data.find((r) => r.login_id === 'tester02')?.display_name === '테스터이(수정)',
+  `${afterBulk.data?.length}명`)
+
 /* ---------------------------------------------------- 3. 참가자 로그인 */
 console.log('\n[3] 참가자 로그인 (익명 → claim)')
 const anonUp = await call('/auth/v1/signup', { method: 'POST', body: {} })
@@ -200,6 +218,13 @@ const peekPages = await rest('/pages?select=id', { token: P1 })
 check('시작 전에는 페이지도 안 보임',
   peekPages.ok && peekPages.data.length === 0,
   JSON.stringify(peekPages.data))
+
+const notAdminBulk = await rpc('admin_upsert_participants', {
+  p_session_id: SESSION,
+  p_rows: [{ login_id: 'hack01', passcode: 'x', display_name: '침입' }],
+}, P1)
+check('참가자는 일괄 등록 RPC 를 쓸 수 없음', !notAdminBulk.ok,
+  `status ${notAdminBulk.status}`)
 
 /* ------------------------------------------------------- 5. 진행 제어 */
 console.log('\n[5] 진행 제어')
@@ -394,7 +419,7 @@ check('문항은 남아 있음', keptSlides.data?.length === 4, `${keptSlides.da
 
 const keptParts = await rest(
   `/participants?select=id&session_id=eq.${SESSION}`, { token: ADMIN })
-check('참가자 명단도 남아 있음', keptParts.data?.length === 2,
+check('참가자 명단도 남아 있음', keptParts.data?.length === 3,
   `${keptParts.data?.length}명`)
 
 // 참가자는 다시 로그인하지 않아도 됩니다.

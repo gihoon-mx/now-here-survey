@@ -139,15 +139,14 @@ export default function ParticipantManager({ sessionId }: { sessionId: string })
       // 같은 아이디는 덮어쓰고 새 아이디는 추가합니다.
       // (현장에서 명단을 고쳐 다시 올리는 일이 흔합니다.)
       //
-      // ⚠️ 여기에 .select() 를 붙이지 마세요. 붙이면 PostgREST 가 삽입한 행을
-      // 되돌려주려 하는데, 그 안에 passcode 열이 들어갑니다. 그 열은 읽기
-      // 권한이 없어 통째로 403 이 납니다. 반환값 없이 넣어야 합니다.
-      const { error: upsertError } = await supabase
-        .from('participants')
-        .upsert(
-          parsed.map((r) => ({ ...r, session_id: sessionId })),
-          { onConflict: 'session_id,login_id' },
-        )
+      // ⚠️ 테이블에 직접 upsert 하면 안 됩니다. ON CONFLICT DO UPDATE 가
+      // excluded.passcode 를 읽는데, passcode 열은 SELECT 권한이 회수되어
+      // 있어 관리자라도 "permission denied" 가 납니다. 소유자 권한으로 도는
+      // RPC 가 대신 처리합니다.
+      const { error: upsertError } = await supabase.rpc('admin_upsert_participants', {
+        p_session_id: sessionId,
+        p_rows: parsed,
+      })
 
       if (upsertError) throw new Error(upsertError.message)
       setNotice(`${parsed.length}명을 등록했습니다.`)

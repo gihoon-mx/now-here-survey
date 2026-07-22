@@ -300,6 +300,10 @@ git config user.email
 **비밀번호 열.** `participants.passcode` 는 컬럼 단위로 `select` 권한을
 회수해 두었습니다. 검증은 `claim_participant` 함수 안에서만 일어나고,
 관리자 화면은 별도 함수(`admin_list_participants`)로 조회합니다.
+열 권한은 RLS 와 달리 관리자에게도 똑같이 적용되므로, 명단 파일 일괄
+등록(upsert)도 테이블에 직접 쏘지 않고 `admin_upsert_participants` 함수를
+거칩니다 — `on conflict do update` 가 `excluded.passcode` 를 읽는 것도
+select 권한을 요구하기 때문입니다.
 값 자체는 평문입니다 — 행사 당일 참가자에게 다시 알려줘야 하기 때문이고,
 행사 후에는 세션을 지워 정리하는 것을 전제로 합니다.
 
@@ -352,7 +356,7 @@ npm run smoke
 `ADMIN_EMAIL=관리자이메일 ADMIN_PASSWORD=비밀번호 npm run smoke`
 
 RLS 는 조용히 열리고 조용히 막히는 게 문제라, 눈으로 보고 넘어가면 놓치기
-쉽습니다. 63개 항목이 모두 PASS 여야 정상입니다.
+쉽습니다. 66개 항목이 모두 PASS 여야 정상입니다.
 
 Realtime 동기화(관리자가 넘기면 참가자 화면이 따라오는 부분)는 HTTP 로
 확인할 수 없어 따로 있습니다:
@@ -403,7 +407,7 @@ ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run loadtest -- --participants 40 --slide
 - [x] Supabase 익명 로그인 **켜짐**
 - [x] Supabase 익명 로그인 **rate limit 상향** (200 으로 설정됨)
 - [x] 관리자 계정이 `admins` 테이블에 등록됨
-- [ ] `npm run smoke` 63개 항목 전부 PASS
+- [ ] `npm run smoke` 66개 항목 전부 PASS
 - [ ] `npm run multi` 8개 항목 전부 PASS
 - [ ] `npm run realtime` 16개 항목 전부 PASS
 - [ ] `npm run render-check` 48개 항목 전부 PASS

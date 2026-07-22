@@ -622,6 +622,44 @@ begin
 end;
 $$;
 
+/*
+ * 참가자 명단 일괄 등록 (파일 가져오기).
+ *
+ * 클라이언트에서 upsert 를 직접 쏘면 ON CONFLICT DO UPDATE 가 excluded.passcode
+ * 를 읽는데, passcode 열은 SELECT 권한을 회수해 두어 관리자라도 거부됩니다
+ * (열 권한은 RLS 와 달리 역할 단위라 관리자 예외가 없습니다). 그래서 소유자
+ * 권한으로 도는 이 함수가 대신 처리합니다. 같은 아이디는 덮어씁니다.
+ */
+create or replace function public.admin_upsert_participants(
+  p_session_id uuid,
+  p_rows       jsonb  -- [{ "login_id", "passcode", "display_name" }, ...]
+)
+returns int
+language plpgsql security definer set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  if not public.is_admin() then raise exception '권한이 없습니다.'; end if;
+
+  insert into public.participants (session_id, login_id, passcode, display_name)
+  select p_session_id,
+         trim(r->>'login_id'),
+         trim(r->>'passcode'),
+         trim(r->>'display_name')
+  from jsonb_array_elements(p_rows) as r
+  where coalesce(trim(r->>'login_id'), '') <> ''
+    and coalesce(trim(r->>'passcode'), '') <> ''
+    and coalesce(trim(r->>'display_name'), '') <> ''
+  on conflict (session_id, login_id)
+  do update set passcode     = excluded.passcode,
+                display_name = excluded.display_name;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
 create or replace function public.admin_list_participants(p_session_id uuid)
 returns table (
   id uuid, login_id text, passcode text, display_name text,
@@ -812,6 +850,7 @@ grant execute on function public.end_session(uuid)              to authenticated
 grant execute on function public.reset_session(uuid)            to authenticated;
 grant execute on function public.duplicate_survey(uuid, text)   to authenticated;
 grant execute on function public.admin_list_participants(uuid)  to authenticated;
+grant execute on function public.admin_upsert_participants(uuid, jsonb) to authenticated;
 grant execute on function public.admin_survey_participants(uuid) to authenticated;
 
 -- ------------------------------------------------------------
