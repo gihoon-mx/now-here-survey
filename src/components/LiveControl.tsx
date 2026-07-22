@@ -71,9 +71,16 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
         },
         () => void refreshAnswered(),
       )
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') void refreshAnswered()
+      })
+
+    // 카운터가 멈춰 있으면 관리자가 넘길 타이밍을 잘못 잡게 되므로,
+    // Realtime 이벤트가 유실돼도 숫자는 따라오게 해 둡니다.
+    const poll = setInterval(() => void refreshAnswered(), 5000)
 
     return () => {
+      clearInterval(poll)
       void supabase.removeChannel(channel)
     }
   }, [current, refreshAnswered])

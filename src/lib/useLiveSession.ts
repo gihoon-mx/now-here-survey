@@ -48,7 +48,13 @@ export function useLiveSession(sessionId: string | null) {
         },
         (payload) => setSession(payload.new as Session),
       )
-      .subscribe()
+      .subscribe((status) => {
+        // SUBSCRIBED 가 보고된 시점과 서버 쪽 복제 구독이 실제로 붙는 시점
+        // 사이에 짧은 틈이 있어, 그 사이에 일어난 변경은 통보되지 않습니다.
+        // 붙은 직후 한 번 읽어 그 틈을 메웁니다. (늦게 합류하거나 재접속한
+        // 참가자가 바로 이 구간에 걸립니다.)
+        if (status === 'SUBSCRIBED') void refetch()
+      })
 
     const onWake = () => {
       if (document.visibilityState === 'visible') void refetch()
@@ -56,7 +62,13 @@ export function useLiveSession(sessionId: string | null) {
     document.addEventListener('visibilitychange', onWake)
     window.addEventListener('online', onWake)
 
+    // 안전망. 현장 와이파이에서는 Realtime 이벤트가 조용히 유실될 수 있는데,
+    // 참가자 화면이 멈춘 채로 남는 것이 이 앱에서 제일 나쁜 실패입니다.
+    // 30명이 10초 간격으로 읽어도 초당 3건이라 부하는 문제되지 않습니다.
+    const poll = setInterval(() => void refetch(), 10000)
+
     return () => {
+      clearInterval(poll)
       void supabase.removeChannel(channel)
       document.removeEventListener('visibilitychange', onWake)
       window.removeEventListener('online', onWake)
