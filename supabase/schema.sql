@@ -65,16 +65,25 @@ create index if not exists participants_auth_user_idx
   on public.participants (auth_user_id);
 
 -- 응답. (슬라이드, 참가자) 당 한 행 — 진행 중 변경은 덮어쓰기.
+--
+-- answer 와 comment 는 각각 따로 채워질 수 있습니다. 안내 페이지처럼 고를
+-- 것이 없는 항목에도 의견은 남길 수 있어야 하고, 반대로 의견 없이 답만 하는
+-- 경우가 대부분이기 때문입니다. 그래서 둘 다 null 을 허용합니다.
 create table if not exists public.responses (
   id             uuid primary key default gen_random_uuid(),
   session_id     uuid not null references public.sessions(id) on delete cascade,
   slide_id       uuid not null references public.slides(id) on delete cascade,
   participant_id uuid not null references public.participants(id) on delete cascade,
-  answer         jsonb not null,
+  answer         jsonb,
+  comment        text,
   answered_at    timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
   unique (slide_id, participant_id)
 );
+
+-- 기존 프로젝트에 이미 테이블이 있는 경우를 위한 이행 처리.
+alter table public.responses add column if not exists comment text;
+alter table public.responses alter column answer drop not null;
 
 create index if not exists responses_session_idx
   on public.responses (session_id);
@@ -199,10 +208,61 @@ begin
     raise exception '이미 지나간 문항입니다.';
   end if;
 
+  -- comment 는 건드리지 않습니다. 의견을 먼저 쓰고 답을 나중에 고르는
+  -- 순서로도 각각 남아야 합니다.
   insert into public.responses (session_id, slide_id, participant_id, answer)
   values (v_session_id, p_slide_id, v_participant_id, p_answer)
   on conflict (slide_id, participant_id)
   do update set answer = excluded.answer,
+                updated_at = now();
+end;
+$$;
+
+-- 항목별 자유 의견. 안내 페이지를 포함해 모든 항목에 남길 수 있습니다.
+-- 진행 중인 항목인지 확인하는 규칙은 응답과 동일합니다.
+create or replace function public.submit_comment(
+  p_slide_id uuid,
+  p_comment  text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_participant_id uuid;
+  v_session_id     uuid;
+  v_slide          public.slides%rowtype;
+  v_session        public.sessions%rowtype;
+begin
+  select id, session_id into v_participant_id, v_session_id
+  from public.participants
+  where auth_user_id = auth.uid();
+
+  if v_participant_id is null then
+    raise exception '참가자 인증이 필요합니다.';
+  end if;
+
+  select * into v_slide from public.slides where id = p_slide_id;
+  if v_slide.id is null or v_slide.session_id <> v_session_id then
+    raise exception '잘못된 문항입니다.';
+  end if;
+
+  select * into v_session from public.sessions where id = v_session_id;
+
+  if v_session.status <> 'live' then
+    raise exception '진행 중인 설문이 아닙니다.';
+  end if;
+
+  if v_slide.order_index <> v_session.current_slide_index then
+    raise exception '이미 지나간 문항입니다.';
+  end if;
+
+  -- answer 는 건드리지 않습니다.
+  insert into public.responses (session_id, slide_id, participant_id, comment)
+  values (v_session_id, p_slide_id, v_participant_id, nullif(trim(p_comment), ''))
+  on conflict (slide_id, participant_id)
+  do update set comment = nullif(trim(excluded.comment), ''),
                 updated_at = now();
 end;
 $$;
@@ -426,6 +486,7 @@ grant execute on function public.current_participant_id()  to authenticated;
 
 grant execute on function public.claim_participant(text, text) to authenticated;
 grant execute on function public.submit_response(uuid, jsonb)  to authenticated;
+grant execute on function public.submit_comment(uuid, text)    to authenticated;
 grant execute on function public.start_session(uuid)           to authenticated;
 grant execute on function public.move_slide(uuid, int)         to authenticated;
 grant execute on function public.end_session(uuid)             to authenticated;

@@ -3,19 +3,40 @@
    현장에서 폰으로 쓰는 화면이라 터치 영역을 크게 잡습니다.
    ============================================================ */
 
+/*
+ * 색은 옅은 톤으로만 씁니다. 현장에서 몇십 분 동안 들여다보는 화면이라
+ * 채도가 높으면 금방 피로해지고, 문항 내용보다 색이 먼저 눈에 들어옵니다.
+ * 진한 색은 "지금 눌러야 하는 것"과 "잘못된 것"에만 남겨 둡니다.
+ */
 :root {
-  --bg: #f6f7f9;
+  --bg: #f4f6fb;
+  --bg-tint: #eaeef8;
   --surface: #ffffff;
-  --border: #dfe3e8;
-  --text: #14181f;
-  --muted: #6b7480;
-  --primary: #2563eb;
+  --surface-soft: #fafbff;
+  --border: #e3e7f1;
+  --border-strong: #ccd3e4;
+  --text: #1b2133;
+  --muted: #6b7488;
+
+  --primary: #5468d4;
+  --primary-soft: #eef1fd;
   --primary-ink: #ffffff;
-  --danger: #dc2626;
-  --ok: #15803d;
-  --warn: #b45309;
+
+  --ok: #2f8558;
+  --ok-soft: #e9f5ee;
+  --danger: #cf4759;
+  --danger-soft: #fdeef1;
+  --warn: #a9722a;
+  --warn-soft: #fbf3e7;
+
+  /* 문항 유형 구분용. 편집기에서 목록을 훑을 때 유형이 바로 보이게 합니다. */
+  --type-choice: #6f62c9;
+  --type-ox: #3a8d9b;
+  --type-info: #b07a45;
+  --type-text: #5f8a4a;
+
   --radius: 12px;
-  --shadow: 0 1px 2px rgb(20 24 31 / 6%), 0 4px 12px rgb(20 24 31 / 4%);
+  --shadow: 0 1px 2px rgb(27 33 51 / 5%), 0 4px 14px rgb(27 33 51 / 5%);
 }
 
 * {
@@ -30,7 +51,8 @@ body,
 
 body {
   margin: 0;
-  background: var(--bg);
+  /* 위쪽만 아주 옅게 눌러 화면에 깊이를 줍니다. 스크롤해도 배경이 붙어 있게. */
+  background: var(--bg) linear-gradient(var(--bg-tint), var(--bg) 320px) no-repeat;
   color: var(--text);
   font-family: system-ui, -apple-system, 'Segoe UI', 'Malgun Gothic', sans-serif;
   font-size: 16px;
@@ -309,25 +331,32 @@ textarea {
 
 .badge--ok {
   color: var(--ok);
-  border-color: currentColor;
+  background: var(--ok-soft);
+  border-color: transparent;
 }
 
 .badge--err {
   color: var(--danger);
-  border-color: currentColor;
+  background: var(--danger-soft);
+  border-color: transparent;
 }
 
 .badge--live {
   color: var(--ok);
-  border-color: currentColor;
+  background: var(--ok-soft);
+  border-color: transparent;
 }
 
 .badge--draft {
-  color: var(--muted);
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: transparent;
 }
 
 .badge--ended {
   color: var(--muted);
+  background: var(--bg-tint);
+  border-color: transparent;
 }
 
 .slide {
@@ -388,7 +417,7 @@ textarea {
   font-family: inherit;
   font-size: 1.05rem;
   text-align: left;
-  padding: 18px 16px;
+  padding: 16px;
   border-radius: 12px;
   border: 2px solid var(--border);
   background: var(--surface);
@@ -396,18 +425,61 @@ textarea {
   cursor: pointer;
   min-height: 56px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
   transition: border-color 0.12s, background 0.12s;
 }
 
 .choice--selected {
   border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  background: var(--primary-soft);
   font-weight: 600;
+}
+
+.choice__label {
+  line-height: 1.35;
+}
+
+/* 선택지 설명. 작은 글씨로 아래에 붙습니다. */
+.choice__desc {
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.choices--ox .choice__desc {
+  font-size: 0.9rem;
 }
 
 .text-answer {
   min-height: 140px;
+}
+
+/* 항목별 자유 의견 */
+
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.comment__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.comment__optional {
+  font-weight: 400;
+}
+
+.comment__input {
+  background: var(--surface-soft);
 }
 
 /* -------------------------------------------------------- 관리자 화면 */
@@ -506,17 +578,18 @@ textarea {
 
 .timer {
   flex: 1;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--primary-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
+  color: var(--primary);
 }
 
 .timer__label {
   font-size: 0.75rem;
-  color: var(--muted);
+  opacity: 0.75;
 }
 
 .timer__value {
@@ -577,6 +650,7 @@ textarea {
   font-size: 2.2rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  color: var(--primary);
 }
 
 .counter__total {
@@ -664,11 +738,17 @@ textarea {
   min-width: 0;
 }
 
+/* 유형별 색. 목록을 훑을 때 무슨 항목인지 바로 보이게 합니다. */
 .slide-card__type {
   font-size: 0.72rem;
   color: var(--muted);
   font-weight: 700;
 }
+
+.slide-card__type--choice { color: var(--type-choice); }
+.slide-card__type--ox     { color: var(--type-ox); }
+.slide-card__type--info   { color: var(--type-info); }
+.slide-card__type--text   { color: var(--type-text); }
 
 .slide-card__title {
   font-size: 0.95rem;
@@ -701,10 +781,28 @@ textarea {
   gap: 6px;
 }
 
+.option-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
 .option-row {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+/* 설명 입력은 본문보다 한 단계 여리게 — 보조 정보임이 보이게 합니다. */
+.option-desc {
+  font-size: 0.85rem;
+  padding: 8px 10px;
+  color: var(--muted);
+  background: var(--surface);
 }
 
 .option-row input {
@@ -886,8 +984,18 @@ textarea {
 
 .present__options li {
   border: 2px solid var(--border);
+  background: var(--surface-soft);
   border-radius: 14px;
   padding: 1.4vh 2vw;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4vh;
+}
+
+.present__option-desc {
+  font-size: 0.5em;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .present__options--ox {
@@ -897,6 +1005,7 @@ textarea {
 .present__options--ox li {
   flex: 1;
   text-align: center;
+  align-items: center;
   font-size: clamp(3rem, 9vw, 8rem);
   font-weight: 700;
 }

@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useLiveSession } from '../lib/useLiveSession'
 import { formatDuration, useElapsedSeconds } from '../lib/useElapsed'
 import { useWakeLock } from '../lib/useWakeLock'
-import type { Slide } from '../lib/types'
+import { slideOptions, type Slide } from '../lib/types'
 
 /**
  * 빔프로젝터용 화면. 조작 UI가 없고 진행만 따라갑니다.
@@ -71,6 +71,7 @@ export default function PresentPage() {
     )
 
   const current = slides.find((s) => s.order_index === session.current_slide_index)
+  const options = slideOptions(current?.options)
 
   return (
     <div className="present">
@@ -85,10 +86,21 @@ export default function PresentPage() {
         <h1 className="present__title">{current?.title ?? ''}</h1>
         {current?.body && <p className="present__body">{current.body}</p>}
 
-        {current && current.type !== 'info' && current.options.length > 0 && (
-          <ul className={current.type === 'ox' ? 'present__options present__options--ox' : 'present__options'}>
-            {current.options.map((option) => (
-              <li key={option}>{option}</li>
+        {current && current.type !== 'info' && options.length > 0 && (
+          <ul
+            className={
+              current.type === 'ox'
+                ? 'present__options present__options--ox'
+                : 'present__options'
+            }
+          >
+            {options.map((option, i) => (
+              <li key={`${option.label}-${i}`}>
+                <span className="present__option-label">{option.label}</span>
+                {option.description && (
+                  <span className="present__option-desc">{option.description}</span>
+                )}
+              </li>
             ))}
           </ul>
         )}

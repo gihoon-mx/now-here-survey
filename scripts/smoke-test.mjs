@@ -191,10 +191,43 @@ const future = await rpc('submit_response',
   { p_slide_id: slides[3].id, p_answer: { text: '미리 답하기' } }, P1)
 check('아직 안 나온 문항에는 응답 불가', !future.ok, `status ${future.status}`)
 
+/* --------------------------------------------------- 6-2. 항목별 의견 */
+const cmt = await rpc('submit_comment',
+  { p_slide_id: slides[1].id, p_comment: '설명이 조금 헷갈렸습니다' }, P1)
+check('의견 저장', cmt.ok, cmt.ok ? '' : JSON.stringify(cmt.data))
+
+const withCmt = await rest(
+  `/responses?select=answer,comment&slide_id=eq.${slides[1].id}`, { token: P1 })
+check('의견이 응답을 지우지 않음',
+  withCmt.data?.[0]?.comment === '설명이 조금 헷갈렸습니다' &&
+  withCmt.data?.[0]?.answer?.choice === '매우 그렇다',
+  JSON.stringify(withCmt.data))
+
+const reAns = await rpc('submit_response',
+  { p_slide_id: slides[1].id, p_answer: { choice: '보통' } }, P1)
+const afterReAns = await rest(
+  `/responses?select=answer,comment&slide_id=eq.${slides[1].id}`, { token: P1 })
+check('응답을 바꿔도 의견이 남음',
+  reAns.ok && afterReAns.data?.[0]?.comment === '설명이 조금 헷갈렸습니다' &&
+  afterReAns.data?.[0]?.answer?.choice === '보통',
+  JSON.stringify(afterReAns.data))
+
+const blank = await rpc('submit_comment',
+  { p_slide_id: slides[1].id, p_comment: '   ' }, P1)
+const afterBlank = await rest(
+  `/responses?select=comment&slide_id=eq.${slides[1].id}`, { token: P1 })
+check('공백만 남기면 의견은 비워짐',
+  blank.ok && afterBlank.data?.[0]?.comment === null,
+  JSON.stringify(afterBlank.data))
+
 await rpc('move_slide', { p_session_id: SESSION, p_delta: 1 }, ADMIN)
 const past = await rpc('submit_response',
   { p_slide_id: slides[1].id, p_answer: { choice: '아니다' } }, P1)
 check('지나간 문항은 수정 불가', !past.ok, `status ${past.status}`)
+
+const pastCmt = await rpc('submit_comment',
+  { p_slide_id: slides[1].id, p_comment: '뒤늦게 덧붙이기' }, P1)
+check('지나간 문항에는 의견도 불가', !pastCmt.ok, `status ${pastCmt.status}`)
 
 /* ------------------------------------------- 7. 다른 참가자 응답 격리 */
 console.log('\n[7] 응답 격리')
@@ -202,6 +235,12 @@ const anon2 = await call('/auth/v1/signup', { method: 'POST', body: {} })
 const P2 = anon2.data.access_token
 await rpc('claim_participant', { p_login_id: 'tester02', p_passcode: 'pw2222' }, P2)
 await rpc('submit_response', { p_slide_id: slides[2].id, p_answer: { choice: 'O' } }, P2)
+
+// 안내 페이지(0번)는 지나갔으므로, 의견만 남기는 경우는 현재 항목에서 확인합니다.
+const onlyCmt = await rpc('submit_comment',
+  { p_slide_id: slides[2].id, p_comment: '답은 골랐고 의견도 남깁니다' }, P2)
+check('답과 의견이 한 행에 함께 저장됨', onlyCmt.ok,
+  onlyCmt.ok ? '' : JSON.stringify(onlyCmt.data))
 
 const p1sees = await rest('/responses?select=participant_id', { token: P1 })
 check('참가자는 남의 응답을 볼 수 없음', p1sees.ok && p1sees.data.length === 1,

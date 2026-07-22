@@ -1,6 +1,12 @@
 import * as XLSX from 'xlsx'
-import { answerToText, type AdminParticipant, type ResponseRow, type Slide } from './types'
-import { SLIDE_TYPE_LABEL } from './types'
+import {
+  answerToText,
+  slideOptions,
+  SLIDE_TYPE_LABEL,
+  type AdminParticipant,
+  type ResponseRow,
+  type Slide,
+} from './types'
 
 /* ------------------------------------------------------------- import */
 
@@ -139,6 +145,10 @@ export function buildWorkbook(params: {
   const byKey = new Map<string, ResponseRow>()
   for (const r of responses) byKey.set(`${r.slide_id}::${r.participant_id}`, r)
 
+  // 의견은 안내 페이지에도 남을 수 있으므로, 의견 열은 모든 항목을 대상으로
+  // 합니다. 반대로 응답 열은 고를 것이 있는 항목만 대상입니다.
+  const allSlides = [...slides].sort((a, b) => a.order_index - b.order_index)
+
   /* 가로 */
   const wide = participants.map((p) => {
     const row: Record<string, string> = {
@@ -147,8 +157,16 @@ export function buildWorkbook(params: {
     }
     questionSlides.forEach((slide, i) => {
       // 문항 제목이 겹쳐도 열이 합쳐지지 않도록 번호를 붙입니다.
-      const column = `${i + 1}. ${slide.title}`
-      row[column] = answerToText(byKey.get(`${slide.id}::${p.id}`)?.answer)
+      row[`${i + 1}. ${slide.title}`] = answerToText(
+        byKey.get(`${slide.id}::${p.id}`)?.answer,
+      )
+    })
+    allSlides.forEach((slide, i) => {
+      const comment = byKey.get(`${slide.id}::${p.id}`)?.comment
+      // 아무도 의견을 남기지 않은 항목까지 열을 만들면 표가 지저분해집니다.
+      if (responses.some((r) => r.slide_id === slide.id && r.comment)) {
+        row[`[의견] ${i + 1}. ${slide.title}`] = comment ?? ''
+      }
     })
     return row
   })
@@ -156,8 +174,12 @@ export function buildWorkbook(params: {
   /* 세로 */
   const long: Record<string, string | number>[] = []
   for (const p of participants) {
-    questionSlides.forEach((slide, i) => {
+    allSlides.forEach((slide, i) => {
       const response = byKey.get(`${slide.id}::${p.id}`)
+      const isQuestion = slide.type !== 'info'
+      // 응답도 의견도 없으면 행을 만들지 않습니다 (안내 페이지가 특히 그렇습니다).
+      if (!isQuestion && !response?.comment) return
+
       long.push({
         이름: p.display_name,
         아이디: p.login_id,
@@ -165,24 +187,47 @@ export function buildWorkbook(params: {
         문항: slide.title,
         유형: TYPE_LABEL[slide.type],
         응답: answerToText(response?.answer),
-        응답여부: response ? 'O' : '',
+        의견: response?.comment ?? '',
+        응답여부: response?.answer ? 'O' : '',
         최초응답시각: formatTimestamp(response?.answered_at ?? null),
         최종수정시각: formatTimestamp(response?.updated_at ?? null),
       })
     })
   }
 
+  /* 의견만 모아 보기 — 인터뷰 서베이에서는 여기가 제일 값진 시트입니다. */
+  const comments: Record<string, string | number>[] = []
+  for (const p of participants) {
+    allSlides.forEach((slide, i) => {
+      const comment = byKey.get(`${slide.id}::${p.id}`)?.comment
+      if (!comment) return
+      comments.push({
+        문항번호: i + 1,
+        문항: slide.title,
+        이름: p.display_name,
+        아이디: p.login_id,
+        응답: answerToText(byKey.get(`${slide.id}::${p.id}`)?.answer),
+        의견: comment,
+      })
+    })
+  }
+
   /* 문항 정의 */
-  const slideSheet = slides
-    .sort((a, b) => a.order_index - b.order_index)
-    .map((slide, i) => ({
+  const slideSheet = allSlides.map((slide, i) => {
+    const options = slideOptions(slide.options)
+    return {
       순서: i + 1,
       유형: TYPE_LABEL[slide.type],
       제목: slide.title,
       설명: slide.body ?? '',
-      선택지: slide.options.join(' | '),
+      선택지: options.map((o) => o.label).join(' | '),
+      선택지설명: options
+        .filter((o) => o.description)
+        .map((o) => `${o.label}: ${o.description}`)
+        .join(' | '),
       복수선택: slide.multi ? 'O' : '',
-    }))
+    }
+  })
 
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(
@@ -195,6 +240,13 @@ export function buildWorkbook(params: {
     XLSX.utils.json_to_sheet(long),
     '응답(세로)',
   )
+  if (comments.length > 0) {
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(comments),
+      '의견',
+    )
+  }
   XLSX.utils.book_append_sheet(
     workbook,
     XLSX.utils.json_to_sheet(slideSheet),

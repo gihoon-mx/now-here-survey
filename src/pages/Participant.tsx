@@ -140,6 +140,7 @@ function LiveView({ participant }: { participant: Participant }) {
   const { session } = useLiveSession(participant.session_id)
   const [slide, setSlide] = useState<Slide | null>(null)
   const [answer, setAnswer] = useState<Answer | null>(null)
+  const [comment, setComment] = useState('')
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>(
     'idle',
   )
@@ -167,18 +168,22 @@ function LiveView({ participant }: { participant: Participant }) {
       if (cancelled) return
       setSlide((slideRow as Slide) ?? null)
       setAnswer(null)
+      setComment('')
       setSaveState('idle')
       setSaveError(null)
 
       if (slideRow) {
         const { data: responseRow } = await supabase
           .from('responses')
-          .select('answer')
+          .select('answer, comment')
           .eq('slide_id', (slideRow as Slide).id)
           .eq('participant_id', participant.id)
           .maybeSingle()
 
-        if (!cancelled && responseRow) setAnswer(responseRow.answer as Answer)
+        if (!cancelled && responseRow) {
+          setAnswer((responseRow.answer as Answer) ?? null)
+          setComment(responseRow.comment ?? '')
+        }
       }
     })()
 
@@ -217,6 +222,28 @@ function LiveView({ participant }: { participant: Participant }) {
     [save],
   )
 
+  const updateComment = useCallback(
+    async (next: string) => {
+      setComment(next)
+      if (!slide) return
+      setSaveState('saving')
+      setSaveError(null)
+
+      const { error } = await supabase.rpc('submit_comment', {
+        p_slide_id: slide.id,
+        p_comment: next,
+      })
+
+      if (error) {
+        setSaveState('error')
+        setSaveError(error.message)
+      } else {
+        setSaveState('saved')
+      }
+    },
+    [slide],
+  )
+
   if (!session) return <Centered>설문을 불러오는 중…</Centered>
 
   if (session.status === 'draft')
@@ -248,7 +275,13 @@ function LiveView({ participant }: { participant: Participant }) {
       </header>
 
       <main className="slide">
-        <SlideView slide={slide} answer={answer} onChange={update} />
+        <SlideView
+          slide={slide}
+          answer={answer}
+          onChange={update}
+          comment={comment}
+          onCommentChange={updateComment}
+        />
 
         {saveError && <p className="error">{saveError}</p>}
 
@@ -269,10 +302,12 @@ function SaveBadge({
   state: 'idle' | 'saving' | 'saved' | 'error'
   type: Slide['type']
 }) {
-  if (type === 'info') return null
   if (state === 'saving') return <span className="badge">저장 중…</span>
   if (state === 'saved') return <span className="badge badge--ok">저장됨</span>
   if (state === 'error') return <span className="badge badge--err">저장 실패</span>
+  // 안내 페이지에는 고를 것이 없으므로 "미응답"이라고 하면 어색합니다.
+  // (의견은 안내 페이지에도 남길 수 있습니다.)
+  if (type === 'info') return null
   return <span className="badge badge--muted">미응답</span>
 }
 

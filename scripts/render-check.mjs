@@ -29,9 +29,15 @@ const server = await createServer({
 
 const { SlideView } = await server.ssrLoadModule('/src/components/SlideView.tsx')
 
-const render = (slide, answer = null) =>
+const render = (slide, answer = null, comment = '') =>
   renderToStaticMarkup(
-    createElement(SlideView, { slide, answer, onChange: () => {} }),
+    createElement(SlideView, {
+      slide,
+      answer,
+      comment,
+      onChange: () => {},
+      onCommentChange: () => {},
+    }),
   )
 
 console.log('\n[문항 유형별 렌더링]')
@@ -40,19 +46,38 @@ const choice = render({
   type: 'choice',
   title: '만족도는 어떠셨나요?',
   body: '하나만 골라 주세요.',
-  options: ['매우 그렇다', '보통', '아니다'],
+  options: [
+    { label: '매우 그렇다', description: '기대한 것보다 좋았다' },
+    { label: '보통' },
+    { label: '아니다' },
+  ],
   multi: false,
 })
 check('다지선다 — 제목 표시', choice.includes('만족도는 어떠셨나요?'))
 check('다지선다 — 설명 표시', choice.includes('하나만 골라 주세요.'))
 check('다지선다 — 선택지 3개', (choice.match(/class="choice"/g) ?? []).length === 3)
+check('선택지 설명이 작은 글씨로 표시됨',
+  choice.includes('choice__desc') && choice.includes('기대한 것보다 좋았다'))
+check('설명 없는 선택지에는 빈 요소가 생기지 않음',
+  (choice.match(/choice__desc/g) ?? []).length === 1)
+
+// 예전에 저장된 문자열 배열도 그대로 읽혀야 합니다.
+const legacy = render({
+  type: 'choice',
+  title: '예전 형식',
+  body: null,
+  options: ['A', 'B'],
+  multi: false,
+})
+check('문자열 배열로 저장된 예전 선택지도 표시됨',
+  legacy.includes('>A<') && legacy.includes('>B<'))
 
 const selected = render(
   {
     type: 'choice',
     title: '만족도',
     body: null,
-    options: ['A', 'B'],
+    options: [{ label: 'A' }, { label: 'B' }],
     multi: false,
   },
   { choice: 'B' },
@@ -66,7 +91,7 @@ const multi = render(
     type: 'choice',
     title: '복수 선택',
     body: null,
-    options: ['A', 'B', 'C'],
+    options: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
     multi: true,
   },
   { choices: ['A', 'C'] },
@@ -74,17 +99,42 @@ const multi = render(
 check('복수 선택 — 두 개가 선택됨',
   (multi.match(/choice--selected/g) ?? []).length === 2)
 
-const ox = render({ type: 'ox', title: '재참여 의향', body: null, options: ['O', 'X'], multi: false })
+const ox = render({
+  type: 'ox',
+  title: '재참여 의향',
+  body: null,
+  options: [{ label: 'O', description: '다시 참여하겠다' }, { label: 'X' }],
+  multi: false,
+})
 check('OX — 가로 배치 클래스', ox.includes('choices--ox'))
 check('OX — 선택지 2개', (ox.match(/class="choice"/g) ?? []).length === 2)
+check('OX — 설명도 표시됨', ox.includes('다시 참여하겠다'))
 
 const info = render({ type: 'info', title: '잠시 안내드립니다', body: '곧 시작합니다.', options: [], multi: false })
 check('안내 페이지 — 제목 표시', info.includes('잠시 안내드립니다'))
-check('안내 페이지 — 응답 입력란 없음', !info.includes('class="choice"') && !info.includes('textarea'))
+check('안내 페이지 — 선택지 없음', !info.includes('class="choice"'))
 
 const text = render({ type: 'text', title: '자유 의견', body: null, options: [], multi: false }, { text: '좋았습니다' })
-check('주관식 — 입력란 표시', text.includes('textarea'))
+check('주관식 — 입력란 표시', text.includes('text-answer'))
 check('주관식 — 기존 응답이 채워짐', text.includes('좋았습니다'))
+
+console.log('\n[항목별 자유 의견]')
+// 모든 유형에 의견란이 붙어야 합니다 — 안내 페이지 포함.
+for (const [label, markup] of [
+  ['다지선다', choice],
+  ['OX', ox],
+  ['안내 페이지', info],
+  ['주관식', text],
+]) {
+  check(`${label} — 의견란 표시`, markup.includes('comment__input'))
+}
+
+const withComment = render(
+  { type: 'info', title: '안내', body: null, options: [], multi: false },
+  null,
+  '이미 적어 둔 의견',
+)
+check('기존 의견이 채워짐', withComment.includes('이미 적어 둔 의견'))
 
 console.log('\n[편집 중간 상태]')
 // 편집기에서는 선택지가 아직 비어 있는 순간이 자연스럽게 생깁니다.

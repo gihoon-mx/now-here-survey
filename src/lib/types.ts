@@ -20,6 +20,18 @@ export interface Session {
   created_at: string
 }
 
+/** 선택지 하나. 설명은 선택지 아래 작은 글씨로 표시됩니다. */
+export interface SlideOption {
+  label: string
+  description?: string
+}
+
+/**
+ * DB 에는 예전 형식(문자열 배열)이 남아 있을 수 있어 둘 다 받습니다.
+ * 읽을 때는 항상 slideOptions() 를 거쳐 형식을 맞춥니다.
+ */
+export type RawOption = string | SlideOption
+
 export interface Slide {
   id: string
   session_id: string
@@ -27,9 +39,19 @@ export interface Slide {
   type: SlideType
   title: string
   body: string | null
-  options: string[]
+  options: RawOption[]
   multi: boolean
   required: boolean
+}
+
+/** 어떤 형식으로 저장돼 있든 { label, description } 배열로 돌려줍니다. */
+export function slideOptions(options: RawOption[] | null | undefined): SlideOption[] {
+  if (!Array.isArray(options)) return []
+  return options.map((option) =>
+    typeof option === 'string'
+      ? { label: option }
+      : { label: option?.label ?? '', description: option?.description || undefined },
+  )
 }
 
 export interface Participant {
@@ -55,7 +77,10 @@ export interface ResponseRow {
   session_id: string
   slide_id: string
   participant_id: string
-  answer: Answer
+  /** 안내 페이지처럼 고를 것이 없는 항목에서는 비어 있습니다. */
+  answer: Answer | null
+  /** 항목별 자유 의견. 모든 항목에서 남길 수 있습니다. */
+  comment: string | null
   answered_at: string
   updated_at: string
 }

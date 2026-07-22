@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Answer, Slide } from '../lib/types'
+import { slideOptions, type Answer, type Slide, type SlideOption } from '../lib/types'
 
 /**
  * 참가자에게 보이는 문항 화면.
@@ -12,16 +12,24 @@ export function SlideView({
   slide,
   answer,
   onChange,
+  comment,
+  onCommentChange,
 }: {
   slide: Pick<Slide, 'type' | 'title' | 'body' | 'options' | 'multi'>
   answer: Answer | null
   onChange: (next: Answer) => void
+  comment: string
+  onCommentChange: (next: string) => void
 }) {
   return (
     <>
       <h1 className="slide__title">{slide.title || '(제목 없음)'}</h1>
       {slide.body && <p className="slide__body">{slide.body}</p>}
+
       <AnswerInput slide={slide} answer={answer} onChange={onChange} />
+
+      {/* 안내 페이지를 포함해 모든 항목에서 의견을 남길 수 있습니다. */}
+      <CommentBox value={comment} onCommit={onCommentChange} />
     </>
   )
 }
@@ -35,6 +43,8 @@ function AnswerInput({
   answer: Answer | null
   onChange: (next: Answer) => void
 }) {
+  const options = slideOptions(slide.options)
+
   switch (slide.type) {
     case 'info':
       return null
@@ -42,7 +52,7 @@ function AnswerInput({
     case 'ox':
       return (
         <ChoiceList
-          options={slide.options.length > 0 ? slide.options : ['O', 'X']}
+          options={options.length > 0 ? options : [{ label: 'O' }, { label: 'X' }]}
           selected={answer?.choice ? [answer.choice] : []}
           variant="ox"
           onPick={(value) => onChange({ choice: value })}
@@ -54,7 +64,7 @@ function AnswerInput({
         const selected = answer?.choices ?? []
         return (
           <ChoiceList
-            options={slide.options}
+            options={options}
             selected={selected}
             variant="list"
             onPick={(value) =>
@@ -69,7 +79,7 @@ function AnswerInput({
       }
       return (
         <ChoiceList
-          options={slide.options}
+          options={options}
           selected={answer?.choice ? [answer.choice] : []}
           variant="list"
           onPick={(value) => onChange({ choice: value })}
@@ -78,7 +88,13 @@ function AnswerInput({
 
     case 'text':
       return (
-        <TextAnswer value={answer?.text ?? ''} onCommit={(t) => onChange({ text: t })} />
+        <DebouncedTextarea
+          className="text-answer"
+          value={answer?.text ?? ''}
+          placeholder="자유롭게 입력해 주세요"
+          rows={6}
+          onCommit={(t) => onChange({ text: t })}
+        />
       )
   }
 }
@@ -89,7 +105,7 @@ function ChoiceList({
   variant,
   onPick,
 }: {
-  options: string[]
+  options: SlideOption[]
   selected: string[]
   variant: 'list' | 'ox'
   onPick: (value: string) => void
@@ -101,31 +117,66 @@ function ChoiceList({
     <div className={variant === 'ox' ? 'choices choices--ox' : 'choices'}>
       {options.map((option, i) => (
         <button
-          key={`${option}-${i}`}
+          key={`${option.label}-${i}`}
           type="button"
           className={
-            'choice' + (selected.includes(option) ? ' choice--selected' : '')
+            'choice' + (selected.includes(option.label) ? ' choice--selected' : '')
           }
-          aria-pressed={selected.includes(option)}
-          onClick={() => onPick(option)}
+          aria-pressed={selected.includes(option.label)}
+          onClick={() => onPick(option.label)}
         >
-          {option}
+          <span className="choice__label">{option.label}</span>
+          {option.description && (
+            <span className="choice__desc">{option.description}</span>
+          )}
         </button>
       ))}
     </div>
   )
 }
 
-/**
- * 주관식은 글자마다 저장하면 요청이 과하게 나가므로,
- * 입력이 잠깐 멈추면 저장하고 포커스가 빠질 때 한 번 더 확정합니다.
- */
-function TextAnswer({
+function CommentBox({
   value,
   onCommit,
 }: {
   value: string
+  onCommit: (next: string) => void
+}) {
+  return (
+    <div className="comment">
+      <label className="comment__label" htmlFor="slide-comment">
+        추가 의견 <span className="comment__optional">(선택)</span>
+      </label>
+      <DebouncedTextarea
+        id="slide-comment"
+        className="comment__input"
+        value={value}
+        placeholder="이 항목에 대해 덧붙이고 싶은 말이 있으면 적어 주세요"
+        rows={3}
+        onCommit={onCommit}
+      />
+    </div>
+  )
+}
+
+/**
+ * 글자마다 저장하면 요청이 과하게 나가므로, 입력이 잠깐 멈추면 저장하고
+ * 포커스가 빠질 때 한 번 더 확정합니다.
+ */
+function DebouncedTextarea({
+  value,
+  onCommit,
+  className,
+  placeholder,
+  rows,
+  id,
+}: {
+  value: string
   onCommit: (text: string) => void
+  className?: string
+  placeholder?: string
+  rows?: number
+  id?: string
 }) {
   const [draft, setDraft] = useState(value)
   const timer = useRef<number | undefined>(undefined)
@@ -160,11 +211,12 @@ function TextAnswer({
 
   return (
     <textarea
-      className="text-answer"
+      id={id}
+      className={className}
       value={draft}
       maxLength={1000}
-      rows={6}
-      placeholder="자유롭게 입력해 주세요"
+      rows={rows}
+      placeholder={placeholder}
       onChange={(e) => schedule(e.target.value)}
       onBlur={flush}
     />

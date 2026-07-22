@@ -48,10 +48,13 @@ export default function LiveControl({ sessionId }: { sessionId: string }) {
       setAnswered(0)
       return
     }
+    // 의견만 남기고 답은 고르지 않은 사람도 행이 생기므로, 실제로 응답한
+    // 사람만 셉니다. (이 숫자를 보고 넘길 타이밍을 잡기 때문에 중요합니다.)
     const { count } = await supabase
       .from('responses')
       .select('id', { count: 'exact', head: true })
       .eq('slide_id', current.id)
+      .not('answer', 'is', null)
     setAnswered(count ?? 0)
   }, [current])
 
