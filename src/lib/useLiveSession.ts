@@ -36,6 +36,10 @@ export function useLiveSession(sessionId: string | null) {
     setLoading(true)
     void refetch()
 
+    // 구독 직후 몇 초간의 따라잡기 재조회 시점(ms).
+    const catchUp = [1500, 4000]
+    const timers: number[] = []
+
     const channel = supabase
       .channel(`session:${sessionId}`)
       .on(
@@ -50,10 +54,22 @@ export function useLiveSession(sessionId: string | null) {
       )
       .subscribe((status) => {
         // SUBSCRIBED 가 보고된 시점과 서버 쪽 복제 구독이 실제로 붙는 시점
-        // 사이에 짧은 틈이 있어, 그 사이에 일어난 변경은 통보되지 않습니다.
-        // 붙은 직후 한 번 읽어 그 틈을 메웁니다. (늦게 합류하거나 재접속한
-        // 참가자가 바로 이 구간에 걸립니다.)
-        if (status === 'SUBSCRIBED') void refetch()
+        // 사이에 틈이 있어, 그 사이에 일어난 변경은 통보되지 않습니다.
+        //
+        // 이 틈은 동시에 접속하는 인원이 많을수록 길어집니다. 30명으로 부하
+        // 테스트를 돌리면 20% 가량이 구독 직후의 첫 이벤트를 놓쳤습니다
+        // (5명일 때는 한 명도 놓치지 않았습니다).
+        //
+        // 그래서 붙은 직후 한 번, 그리고 몇 초간 몇 번 더 읽어 이 구간을
+        // 집중적으로 메웁니다. 아래 10초 주기 재조회만으로도 결국 따라잡기는
+        // 하지만, 하필 시작 순간에 최대 10초를 멈춰 있는 것은 눈에 띕니다.
+        if (status === 'SUBSCRIBED') {
+          void refetch()
+          catchUp.forEach((delay) => {
+            const id = window.setTimeout(() => void refetch(), delay)
+            timers.push(id)
+          })
+        }
       })
 
     const onWake = () => {
@@ -69,6 +85,7 @@ export function useLiveSession(sessionId: string | null) {
 
     return () => {
       clearInterval(poll)
+      timers.forEach(window.clearTimeout)
       void supabase.removeChannel(channel)
       document.removeEventListener('visibilitychange', onWake)
       window.removeEventListener('online', onWake)
