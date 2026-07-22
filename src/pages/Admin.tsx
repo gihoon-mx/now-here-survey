@@ -6,6 +6,7 @@ import SlideEditor from '../components/SlideEditor'
 import ParticipantManager from '../components/ParticipantManager'
 import LiveControl from '../components/LiveControl'
 import ResultsExport from '../components/ResultsExport'
+import ResultsView from '../components/ResultsView'
 import TestRun from '../components/TestRun'
 
 export default function AdminPage() {
@@ -439,11 +440,14 @@ function SurveyDetail({ surveyId }: { surveyId: string }) {
             <TestRun surveyId={surveyId} />
           )}
           {view.kind === 'survey' && view.tab === 'results' && (
-            <ResultsExport
-              surveyId={surveyId}
-              surveyTitle={survey.title}
-              scope={{ kind: 'survey' }}
-            />
+            <>
+              <ResultsExport
+                surveyId={surveyId}
+                surveyTitle={survey.title}
+                scope={{ kind: 'survey' }}
+              />
+              <ResultsView surveyId={surveyId} scope={{ kind: 'survey' }} />
+            </>
           )}
 
           {view.kind === 'session' && activeSession && (
@@ -487,11 +491,17 @@ function SurveyDetail({ surveyId }: { surveyId: string }) {
                 <ParticipantManager sessionId={activeSession.id} />
               )}
               {view.tab === 'results' && (
-                <ResultsExport
-                  surveyId={surveyId}
-                  surveyTitle={survey.title}
-                  scope={{ kind: 'session', sessionId: activeSession.id, sessionName: activeSession.name }}
-                />
+                <>
+                  <ResultsExport
+                    surveyId={surveyId}
+                    surveyTitle={survey.title}
+                    scope={{ kind: 'session', sessionId: activeSession.id, sessionName: activeSession.name }}
+                  />
+                  <ResultsView
+                    surveyId={surveyId}
+                    scope={{ kind: 'session', sessionId: activeSession.id, sessionName: activeSession.name }}
+                  />
+                </>
               )}
             </>
           )}

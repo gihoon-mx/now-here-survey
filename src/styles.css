@@ -1345,6 +1345,174 @@ textarea {
   background: var(--danger-soft);
 }
 
+/* --------------------------------------------------- 결과 웹 조회 */
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.results__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.results__page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.results__page-title {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+/* 문항 하나의 결과 카드 */
+
+.rq {
+  gap: 8px;
+}
+
+.rq__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rq__num {
+  font-weight: 700;
+  color: var(--primary);
+  font-size: 0.85rem;
+}
+
+.rq__count {
+  margin-left: auto;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rq__title {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.4;
+}
+
+/* 선택지별 막대 */
+
+.rq__bars {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rq__bar-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 2fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.rq__bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rq__bar-label--orphan {
+  color: var(--warn);
+}
+
+.rq__bar-track {
+  height: 18px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.rq__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  opacity: 0.75;
+  border-radius: 5px;
+  min-width: 2px;
+  transition: width 0.2s;
+}
+
+.rq__bar-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rq__bar-pct {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.82rem;
+}
+
+/* 주관식·의견 원문 목록 */
+
+.rq__texts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rq__text {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.92rem;
+  white-space: pre-line;
+}
+
+.rq__text--comment {
+  background: var(--warn-soft);
+  border-color: transparent;
+}
+
+.rq__who {
+  flex: none;
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.rq__comments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px dashed var(--border-strong);
+  padding-top: 8px;
+}
+
+.rq__comments-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--warn);
+}
+
 /* -------------------------------------------------------------- 표 */
 
 /* 좁은 화면에서 표가 페이지를 밀어내지 않고 표 안에서만 가로로 스크롤되게 합니다. */
