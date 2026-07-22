@@ -9,14 +9,20 @@ if (!url || !key) {
   )
 }
 
-// 관리자 화면과 참가자 화면이 같은 브라우저에서 열릴 수 있습니다 (리허설/테스트).
-// 저장소 키를 분리해 두면 한쪽 로그인이 다른 쪽을 밀어내지 않습니다.
-const isAdminSurface =
-  location.hash.startsWith('#/admin') || location.hash.startsWith('#/present')
-
+// 저장소 키는 고정합니다.
+//
+// 한때 주소(#/admin 인지)를 보고 관리자용/참가자용 저장소를 나눴는데,
+// 그 판단이 "페이지가 처음 로드된 순간"에만 일어나는 것이 문제였습니다.
+// 이미 열린 참가자 화면 뒤에 #/admin 을 붙이면 해시만 바뀌고 페이지는
+// 다시 로드되지 않아, 관리자 로그인이 참가자용 저장소에 들어갑니다.
+// 그러면 로그인은 된 것처럼 보이다가 새로고침하는 순간 풀려서, 무한
+// 로그인 루프처럼 보입니다.
+//
+// 대신 한 브라우저에서 관리자와 참가자로 동시에 로그인할 수는 없습니다.
+// 리허설할 때는 참가자 쪽을 시크릿 창으로 열면 됩니다.
 export const supabase = createClient(url, key, {
   auth: {
-    storageKey: isAdminSurface ? 'nhs-admin-auth' : 'nhs-participant-auth',
+    storageKey: 'nhs-auth',
     persistSession: true,
     autoRefreshToken: true,
   },

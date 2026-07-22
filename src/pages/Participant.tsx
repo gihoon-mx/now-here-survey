@@ -12,8 +12,14 @@ export default function ParticipantPage() {
     void (async () => {
       try {
         // 1) 익명 세션 확보. 이 토큰이 있어야 RLS 가 "이 사람"을 식별할 수 있습니다.
+        //
+        // 관리자로 로그인한 브라우저에서 이 화면을 열면 그 세션이 남아 있는데,
+        // 관리자는 참가자 명단 전체가 보이기 때문에 아래 조회가 깨지고
+        // 자칫 관리자 계정이 참가자로 묶일 수도 있습니다. 참가자 화면에서는
+        // 익명 세션만 재사용하고, 그 밖의 세션은 정리하고 새로 발급받습니다.
         const { data: existing } = await supabase.auth.getSession()
-        if (!existing.session) {
+        if (!existing.session?.user.is_anonymous) {
+          if (existing.session) await supabase.auth.signOut()
           const { error } = await supabase.auth.signInAnonymously()
           if (error) throw error
         }
