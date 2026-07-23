@@ -451,6 +451,7 @@ declare
   v_slide          public.slides%rowtype;
   v_session        public.sessions%rowtype;
   v_page_index     int;
+  v_existing       public.responses%rowtype;
 begin
   select id, session_id into v_participant_id, v_session_id
   from public.participants where auth_user_id = auth.uid();
@@ -466,14 +467,34 @@ begin
     raise exception '잘못된 문항입니다.';
   end if;
 
-  if v_session.status <> 'live' then
-    raise exception '진행 중인 설문이 아닙니다.';
-  end if;
-
   select order_index into v_page_index from public.pages where id = v_slide.page_id;
-  if v_page_index is distinct from v_session.current_page_index
-     or not v_session.page_revealed then
-    raise exception '지금 진행 중인 문항이 아닙니다.';
+
+  if v_session.status = 'live' then
+    if v_page_index is distinct from v_session.current_page_index
+       or not v_session.page_revealed then
+      raise exception '지금 진행 중인 문항이 아닙니다.';
+    end if;
+
+  elsif v_session.status = 'ended' then
+    /*
+     * 종료 후 보충 응답 화면의 의견란. 응답과 같은 규칙을 따릅니다 —
+     * 진행 중에 이미 답한 문항은 (보충 화면에 나오지 않으므로) 의견도
+     * 잠그고, 놓쳤던 문항에는 실제 진행과 똑같이 의견을 남길 수 있습니다.
+     */
+    if v_page_index > v_session.current_page_index then
+      raise exception '진행되지 않은 문항입니다.';
+    end if;
+
+    select * into v_existing from public.responses
+    where slide_id = p_slide_id and participant_id = v_participant_id;
+
+    if v_existing.id is not null and v_existing.answer is not null
+       and (v_session.ended_at is null or v_existing.answered_at <= v_session.ended_at) then
+      raise exception '이미 응답한 문항입니다.';
+    end if;
+
+  else
+    raise exception '진행 중인 설문이 아닙니다.';
   end if;
 
   insert into public.responses (session_id, slide_id, participant_id, comment)

@@ -384,9 +384,22 @@ const makeupOld = await rpc('submit_response',
 check('진행 중에 답한 문항은 보충으로도 수정 불가', !makeupOld.ok,
   `status ${makeupOld.status}`)
 
+// 보충 화면의 의견란은 실제 진행과 동일하게 동작합니다.
 const makeupCmt = await rpc('submit_comment',
-  { p_slide_id: sText.id, p_comment: '종료 후 의견' }, P1)
-check('종료 후에는 의견을 남길 수 없음', !makeupCmt.ok, `status ${makeupCmt.status}`)
+  { p_slide_id: sText.id, p_comment: '보충하면서 남기는 의견' }, P1)
+check('보충 화면의 문항에는 의견도 남길 수 있음', makeupCmt.ok,
+  makeupCmt.ok ? '' : JSON.stringify(makeupCmt.data))
+
+const makeupCmtSaved = await rest(
+  `/responses?select=comment&slide_id=eq.${sText.id}`, { token: P1 })
+check('보충 의견이 응답과 한 행에 저장됨',
+  makeupCmtSaved.data?.[0]?.comment === '보충하면서 남기는 의견',
+  JSON.stringify(makeupCmtSaved.data))
+
+const makeupCmtOld = await rpc('submit_comment',
+  { p_slide_id: sChoice.id, p_comment: '뒤늦은 의견' }, P1)
+check('진행 중에 답한 문항에는 종료 후 의견 불가', !makeupCmtOld.ok,
+  `status ${makeupCmtOld.status}`)
 
 /* ------------------------------------------------- 9. 복사 / 다시 시작 */
 console.log('\n[9] 복사 / 다시 시작하기')

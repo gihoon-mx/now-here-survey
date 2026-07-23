@@ -260,7 +260,10 @@ git config user.email
 **미응답 문항 답변하기** 버튼이 보이고, 놓친 문항만 모아서 답할 수 있습니다.
 진행 중에 이미 답한 문항은 종료 후 고칠 수 없습니다 — "진행 당시의 응답"
 이라는 결과의 의미를 지키기 위해서입니다. 보충으로 낸 답은 본인이 이어서
-고칠 수 있고(`answered_at` 이 종료 이후인 행), 의견은 종료 후 받지 않습니다.
+고칠 수 있습니다(`answered_at` 이 종료 이후인 행). 보충 화면의 문항은 실제
+진행 때와 똑같이 동작합니다 — 의견란도 그대로 있고(문항별 끔 설정 포함),
+진행 중 남겨 둔 의견이 있으면 이어서 보입니다. 의견도 응답과 같은 규칙을
+따라, 진행 중에 답을 낸 문항에는 종료 후 의견을 받지 않습니다.
 
 **응답 인원 카운터.** 의견만 남긴 사람도 행이 생기기 때문에, 관리자 화면의
 `n / 30` 은 `answer` 가 실제로 채워진 행만 셉니다. 이 숫자를 보고 넘길 타이밍을
@@ -356,7 +359,7 @@ npm run smoke
 `ADMIN_EMAIL=관리자이메일 ADMIN_PASSWORD=비밀번호 npm run smoke`
 
 RLS 는 조용히 열리고 조용히 막히는 게 문제라, 눈으로 보고 넘어가면 놓치기
-쉽습니다. 66개 항목이 모두 PASS 여야 정상입니다.
+쉽습니다. 68개 항목이 모두 PASS 여야 정상입니다.
 
 Realtime 동기화(관리자가 넘기면 참가자 화면이 따라오는 부분)는 HTTP 로
 확인할 수 없어 따로 있습니다:
@@ -407,7 +410,7 @@ ADMIN_EMAIL=... ADMIN_PASSWORD=... npm run loadtest -- --participants 40 --slide
 - [x] Supabase 익명 로그인 **켜짐**
 - [x] Supabase 익명 로그인 **rate limit 상향** (200 으로 설정됨)
 - [x] 관리자 계정이 `admins` 테이블에 등록됨
-- [ ] `npm run smoke` 66개 항목 전부 PASS
+- [ ] `npm run smoke` 68개 항목 전부 PASS
 - [ ] `npm run multi` 8개 항목 전부 PASS
 - [ ] `npm run realtime` 16개 항목 전부 PASS
 - [ ] `npm run render-check` 48개 항목 전부 PASS

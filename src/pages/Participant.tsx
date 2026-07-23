@@ -355,13 +355,15 @@ function LiveView({ participant }: { participant: Participant }) {
  * 설문이 끝난 뒤, 진행 중에 놓친 문항을 마저 답할 수 있게 합니다.
  *
  * 진행된 문항 중 답이 없는 것만 모아 보여 줍니다. 이미 답한 문항은 서버가
- * 수정을 거부하므로 아예 보여 주지 않고, 의견란도 뺍니다 — 여기는 "빠진
- * 답을 채우는" 화면이지 설문을 다시 여는 화면이 아니기 때문입니다.
+ * 수정을 거부하므로 아예 보여 주지 않습니다. 화면에 나온 문항은 실제 진행
+ * 때와 똑같이 동작합니다 — 의견란도 그대로 있습니다 (진행 중에 남겨 둔
+ * 의견이 있으면 이어서 보이고, 문항별 의견란 끔 설정도 따릅니다).
  */
 function EndedView({ participant }: { participant: Participant }) {
   const [phase, setPhase] = useState<'loading' | 'summary' | 'makeup'>('loading')
   const [missed, setMissed] = useState<Slide[]>([])
   const [answers, setAnswers] = useState<Record<string, Answer | null>>({})
+  const [comments, setComments] = useState<Record<string, string>>({})
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({})
   const [saveError, setSaveError] = useState<string | null>(null)
 
@@ -373,16 +375,17 @@ function EndedView({ participant }: { participant: Participant }) {
         supabase.from('slides').select('*'),
         supabase
           .from('responses')
-          .select('slide_id, answer')
+          .select('slide_id, answer, comment')
           .eq('participant_id', participant.id),
       ])
 
       const pages = (pageRes.data as Page[]) ?? []
       const slides = (slideRes.data as Slide[]) ?? []
+      const rows =
+        (respRes.data as { slide_id: string; answer: Answer | null; comment: string | null }[]) ??
+        []
       const answered = new Set(
-        ((respRes.data as { slide_id: string; answer: Answer | null }[]) ?? [])
-          .filter((r) => r.answer != null)
-          .map((r) => r.slide_id),
+        rows.filter((r) => r.answer != null).map((r) => r.slide_id),
       )
 
       const pageOrder = new Map(pages.map((p) => [p.id, p.order_index]))
@@ -394,6 +397,12 @@ function EndedView({ participant }: { participant: Participant }) {
             a.order_index - b.order_index,
         )
 
+      // 놓친 문항에 진행 중 남겨 둔 의견이 있으면 이어서 보여 줍니다.
+      const existingComments: Record<string, string> = {}
+      for (const row of rows) {
+        if (row.comment) existingComments[row.slide_id] = row.comment
+      }
+      setComments(existingComments)
       setMissed(unanswered)
       setPhase('summary')
     })()
@@ -405,6 +414,18 @@ function EndedView({ participant }: { participant: Participant }) {
     setSaveError(null)
     void supabase
       .rpc('submit_response', { p_slide_id: slideId, p_answer: next })
+      .then(({ error }) => {
+        setSaveStates((prev) => ({ ...prev, [slideId]: error ? 'error' : 'saved' }))
+        if (error) setSaveError(error.message)
+      })
+  }, [])
+
+  const saveComment = useCallback((slideId: string, next: string) => {
+    setComments((prev) => ({ ...prev, [slideId]: next }))
+    setSaveStates((prev) => ({ ...prev, [slideId]: 'saving' }))
+    setSaveError(null)
+    void supabase
+      .rpc('submit_comment', { p_slide_id: slideId, p_comment: next })
       .then(({ error }) => {
         setSaveStates((prev) => ({ ...prev, [slideId]: error ? 'error' : 'saved' }))
         if (error) setSaveError(error.message)
@@ -466,9 +487,8 @@ function EndedView({ participant }: { participant: Participant }) {
                 slide={slide}
                 answer={answers[slide.id] ?? null}
                 onChange={(next) => save(slide.id, next)}
-                comment=""
-                onCommentChange={() => {}}
-                showComment={false}
+                comment={comments[slide.id] ?? ''}
+                onCommentChange={(next) => saveComment(slide.id, next)}
               />
             </div>
           </section>

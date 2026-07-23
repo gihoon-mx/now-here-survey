@@ -22,7 +22,7 @@ export function SlideView({
   onChange: (next: Answer) => void
   comment: string
   onCommentChange: (next: string) => void
-  /** 종료 후 보충 응답처럼 의견란을 아예 빼야 하는 화면에서 끕니다. */
+  /** 의견란을 아예 빼야 하는 화면에서 끕니다 (문항 옵션과 별개의 화면 사정). */
   showComment?: boolean
 }) {
   // 의견란은 문항 옵션(기본 켜짐)과 화면 사정 둘 다 허락할 때만 나옵니다.
