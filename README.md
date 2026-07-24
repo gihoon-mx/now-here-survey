@@ -1,3 +1,7 @@
+> **⚠️ 이 리포는 persona-lab 으로 통합되었습니다 (2026-07-24).**
+> 코드·이력·배포 모두 https://github.com/gihoon-mx/persona-lab 의 `apps/survey` 로 옮겨졌고,
+> 새 주소는 https://gihoon-mx.github.io/persona-lab/survey/ 입니다. 이 리포는 보관용입니다.
+
 # now-here-survey
 
 현장 인터뷰 서베이용 웹앱. 참석자는 프리젠테이션 화면을 보면서 폰으로 응답하고,
