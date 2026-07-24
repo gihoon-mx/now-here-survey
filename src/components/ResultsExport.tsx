@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import { buildWorkbook, downloadWorkbook, safeFilename } from '../lib/excel'
 import type { AdminParticipant, Page, ResponseRow, Slide } from '../lib/types'
 
@@ -41,29 +41,32 @@ export default function ResultsExport({
 
       if (isSurvey) {
         // 설문 전체 — 모든 세션의 참가자와 응답을 한 파일에 담습니다.
-        const [pRes, rRes] = await Promise.all([
+        // 응답은 1000행을 넘을 수 있으므로 전량을 페이지로 넘겨 가져옵니다.
+        const [pRes, rRows] = await Promise.all([
           supabase.rpc('admin_survey_participants', { p_survey_id: surveyId }),
-          supabase
-            .from('responses')
-            .select('*, sessions!inner(survey_id)')
-            .eq('sessions.survey_id', surveyId),
+          fetchAllRows<ResponseRow>(() =>
+            supabase
+              .from('responses')
+              .select('*, sessions!inner(survey_id)')
+              .eq('sessions.survey_id', surveyId),
+          ),
         ])
         if (pRes.error) throw new Error(pRes.error.message)
-        if (rRes.error) throw new Error(rRes.error.message)
         participants = (pRes.data as AdminParticipant[]) ?? []
-        responses = (rRes.data as ResponseRow[]) ?? []
+        responses = rRows
       } else {
-        const [pRes, rRes] = await Promise.all([
+        const [pRes, rRows] = await Promise.all([
           supabase.rpc('admin_list_participants', { p_session_id: scope.sessionId }),
-          supabase.from('responses').select('*').eq('session_id', scope.sessionId),
+          fetchAllRows<ResponseRow>(() =>
+            supabase.from('responses').select('*').eq('session_id', scope.sessionId),
+          ),
         ])
         if (pRes.error) throw new Error(pRes.error.message)
-        if (rRes.error) throw new Error(rRes.error.message)
         participants = ((pRes.data as AdminParticipant[]) ?? []).map((p) => ({
           ...p,
           session_name: scope.sessionName,
         }))
-        responses = (rRes.data as ResponseRow[]) ?? []
+        responses = rRows
       }
 
       if (participants.length === 0)

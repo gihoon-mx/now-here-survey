@@ -27,3 +27,28 @@ export const supabase = createClient(url, key, {
     autoRefreshToken: true,
   },
 })
+
+/**
+ * PostgREST 는 한 번에 최대 1000행만 돌려줍니다. 응답이 이 수를 넘으면
+ * (세션이 여러 개거나 문항이 많으면 금방 넘습니다) 뒤쪽이 조용히 잘려,
+ * 전체 결과에서 일부 세션 응답이 통째로 빠지는 것처럼 보입니다.
+ *
+ * 이 헬퍼는 range 로 페이지를 넘기며 전량을 모아 옵니다. build 는 매
+ * 페이지마다 같은 필터가 걸린 새 쿼리를 만들어 돌려주는 함수입니다.
+ */
+export async function fetchAllRows<T>(
+  build: () => {
+    range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+  },
+  pageSize = 1000,
+): Promise<T[]> {
+  const all: T[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build().range(from, from + pageSize - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    all.push(...rows)
+    if (rows.length < pageSize) break
+  }
+  return all
+}

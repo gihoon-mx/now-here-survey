@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAllRows } from '../lib/supabase'
 import type { ExportScope } from './ResultsExport'
 import {
   answerToText,
@@ -50,26 +50,29 @@ export default function ResultsView({
       let pRows: AdminParticipant[]
       let rRows: ResponseRow[]
       if (sessionId === null) {
-        const [pRes, rRes] = await Promise.all([
+        // 응답이 1000행을 넘으면 전량을 페이지로 넘겨 가져옵니다.
+        const [pRes, rows] = await Promise.all([
           supabase.rpc('admin_survey_participants', { p_survey_id: surveyId }),
-          supabase
-            .from('responses')
-            .select('*, sessions!inner(survey_id)')
-            .eq('sessions.survey_id', surveyId),
+          fetchAllRows<ResponseRow>(() =>
+            supabase
+              .from('responses')
+              .select('*, sessions!inner(survey_id)')
+              .eq('sessions.survey_id', surveyId),
+          ),
         ])
         if (pRes.error) throw new Error(pRes.error.message)
-        if (rRes.error) throw new Error(rRes.error.message)
         pRows = (pRes.data as AdminParticipant[]) ?? []
-        rRows = (rRes.data as ResponseRow[]) ?? []
+        rRows = rows
       } else {
-        const [pRes, rRes] = await Promise.all([
+        const [pRes, rows] = await Promise.all([
           supabase.rpc('admin_list_participants', { p_session_id: sessionId }),
-          supabase.from('responses').select('*').eq('session_id', sessionId),
+          fetchAllRows<ResponseRow>(() =>
+            supabase.from('responses').select('*').eq('session_id', sessionId),
+          ),
         ])
         if (pRes.error) throw new Error(pRes.error.message)
-        if (rRes.error) throw new Error(rRes.error.message)
         pRows = (pRes.data as AdminParticipant[]) ?? []
-        rRows = (rRes.data as ResponseRow[]) ?? []
+        rRows = rows
       }
 
       setPages((pagesRes.data as Page[]) ?? [])
